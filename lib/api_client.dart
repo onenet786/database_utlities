@@ -18,6 +18,17 @@ class ApiClient {
     return _post('/api/databases/detach', profile);
   }
 
+  Future<String> fetchHealthMessage() async {
+    final uri = _buildUri('/health');
+    if (uri == null) {
+      throw Exception('Enter the API base URL first.');
+    }
+
+    final response = await http.get(uri);
+    final body = _decodeBody(response.body);
+    return (body['message'] as String?) ?? 'API is reachable.';
+  }
+
   Future<List<DatabaseProfile>> fetchProfiles() async {
     final uri = _buildUri('/api/settings/profiles');
     if (uri == null) {

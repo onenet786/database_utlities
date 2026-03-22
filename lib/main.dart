@@ -190,6 +190,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   int? _busyIndex;
   String? _lastMessage;
   String? _lastCommand;
+  String? _apiStatusMessage;
   final Set<int> _attachedProfileIds = <int>{};
 
   String get _apiBaseUrl => dotenv.env['API_BASE_URL'] ?? '';
@@ -219,6 +220,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     });
 
     try {
+      final apiStatusMessage = await _apiClient.fetchHealthMessage();
       final profiles = await _apiClient.fetchProfiles();
       if (!mounted) {
         return;
@@ -227,6 +229,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       setState(() {
         _profiles = profiles;
         _isLoadingProfiles = false;
+        _apiStatusMessage = apiStatusMessage;
         _lastMessage = profiles.isEmpty
             ? 'No saved settings found in MySQL yet.'
             : 'Loaded ${profiles.length} saved setting(s) from MySQL.';
@@ -239,6 +242,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
       setState(() {
         _isLoadingProfiles = false;
+        _apiStatusMessage = null;
         _lastMessage = 'Could not load saved settings. Details: $error';
         _lastCommand = null;
       });
@@ -505,6 +509,15 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                             fontFamily: 'monospace',
                           ),
                     ),
+                    if (_apiStatusMessage != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        _apiStatusMessage!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFF4F6478),
+                            ),
+                      ),
+                    ],
                   ],
                 ),
               ),

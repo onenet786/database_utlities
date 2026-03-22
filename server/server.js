@@ -13,6 +13,7 @@ const MYSQL_PORT = parseInt(process.env.MYSQL_PORT || '3306', 10);
 const MYSQL_USER = process.env.MYSQL_USER || 'root';
 const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD || '';
 const MYSQL_DATABASE = process.env.MYSQL_DATABASE || 'database_utilities';
+const API_BASE_URL = process.env.API_BASE_URL || '';
 
 let pool;
 
@@ -350,12 +351,42 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/health') {
-    sendJson(res, 200, {
-      success: true,
-      message: 'Database Utilities API is running.',
-      storage: `mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}`,
-      timestamp: new Date().toISOString(),
-    });
+    try {
+      const profiles = await listProfiles();
+      const primaryProfile = profiles[0] || null;
+      const apiHost = req.headers.host || `${HOST}:${PORT}`;
+      const publicApiAddress = API_BASE_URL && API_BASE_URL.trim().length > 0
+        ? API_BASE_URL.trim()
+        : `http://${apiHost}`;
+      const forwardedFor = req.headers['x-forwarded-for'];
+      const remoteAddress =
+        (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor?.split(',')[0]?.trim()) ||
+        req.socket.remoteAddress ||
+        'unknown';
+      const sqlServerName = primaryProfile ? primaryProfile.server : 'not configured';
+      const sqlDatabaseName = primaryProfile ? primaryProfile.databaseName : 'not configured';
+      const sqlServerPort = primaryProfile && String(primaryProfile.server).includes(',')
+        ? String(primaryProfile.server).split(',').pop().trim()
+        : 'default';
+
+      sendJson(res, 200, {
+        success: true,
+        message: `API server ${publicApiAddress} is running. Client remote address: ${remoteAddress}. SQL Server: ${sqlServerName}. SQL port: ${sqlServerPort}. Database: ${sqlDatabaseName}.`,
+        apiServerAddress: apiHost,
+        publicApiAddress,
+        clientRemoteAddress: remoteAddress,
+        sqlServerName,
+        sqlServerPort,
+        sqlDatabaseName,
+        storage: `mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      sendJson(res, 500, {
+        success: false,
+        message: error.message || 'Could not build health status.',
+      });
+    }
     return;
   }
 
@@ -481,9 +512,31 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
+function maskSecret(value) {
+  if (!value) {
+    return '(empty)';
+  }
+
+  return '*'.repeat(Math.max(value.length, 8));
+}
+
+function logStartupSettings() {
+  console.log('================ API SERVER SETTINGS ================');
+  console.log(`API_BASE_URL: ${API_BASE_URL || '(not set)'}`);
+  console.log(`HOST: ${HOST}`);
+  console.log(`PORT: ${PORT}`);
+  console.log(`MYSQL_HOST: ${MYSQL_HOST}`);
+  console.log(`MYSQL_PORT: ${MYSQL_PORT}`);
+  console.log(`MYSQL_USER: ${MYSQL_USER}`);
+  console.log(`MYSQL_PASSWORD: ${maskSecret(MYSQL_PASSWORD)}`);
+  console.log(`MYSQL_DATABASE: ${MYSQL_DATABASE}`);
+  console.log('====================================================');
+}
+
 initializeStorage()
   .then(() => {
     server.listen(PORT, HOST, () => {
+      logStartupSettings();
       console.log(`Database Utilities API listening on http://${HOST}:${PORT}`);
       console.log(`MySQL storage ready on ${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}`);
     });
