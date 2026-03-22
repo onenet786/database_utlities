@@ -733,8 +733,13 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                   final isDetached =
                       profile.attachmentStatus ==
                       DatabaseAttachmentStatus.detached;
+                  final hasNameConflict =
+                      profile.attachmentStatus ==
+                      DatabaseAttachmentStatus.nameConflict;
                   final gradientColors = isAttached
                       ? const [Color(0xFF1F9D55), Color(0xFF14532D)]
+                      : hasNameConflict
+                      ? const [Color(0xFFB45309), Color(0xFF7C2D12)]
                       : const [Color(0xFF0E7490), Color(0xFF164E63)];
                   return Container(
                     padding: const EdgeInsets.all(20),
@@ -798,6 +803,8 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                           'Attached',
                                         DatabaseAttachmentStatus.detached =>
                                           'Detached',
+                                        DatabaseAttachmentStatus.nameConflict =>
+                                          'Name Conflict',
                                         DatabaseAttachmentStatus.unknown =>
                                           'Unknown',
                                       },
@@ -855,7 +862,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                 backgroundColor: Colors.white,
                                 foregroundColor: const Color(0xFF0E7490),
                               ),
-                              onPressed: isBusy || isAttached
+                              onPressed: isBusy || isAttached || hasNameConflict
                                   ? null
                                   : () => _attachDatabase(index),
                               icon: isBusy
@@ -874,7 +881,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                 foregroundColor: Colors.white,
                                 side: const BorderSide(color: Colors.white70),
                               ),
-                              onPressed: isBusy || isDetached
+                              onPressed: isBusy || isDetached || hasNameConflict
                                   ? null
                                   : () => _detachDatabase(index),
                               icon: const Icon(Icons.link_off),

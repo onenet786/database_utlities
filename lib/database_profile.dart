@@ -1,6 +1,6 @@
 enum AuthenticationMode { windows, sqlServer }
 
-enum DatabaseAttachmentStatus { attached, detached, unknown }
+enum DatabaseAttachmentStatus { attached, detached, nameConflict, unknown }
 
 class DatabaseProfile {
   DatabaseProfile({
@@ -50,6 +50,7 @@ class DatabaseProfile {
       attachmentStatus: switch (attachmentStatusValue) {
         'attached' => DatabaseAttachmentStatus.attached,
         'detached' => DatabaseAttachmentStatus.detached,
+        'nameConflict' => DatabaseAttachmentStatus.nameConflict,
         _ => DatabaseAttachmentStatus.unknown,
       },
     );
@@ -70,6 +71,7 @@ class DatabaseProfile {
       'attachmentStatus': switch (attachmentStatus) {
         DatabaseAttachmentStatus.attached => 'attached',
         DatabaseAttachmentStatus.detached => 'detached',
+        DatabaseAttachmentStatus.nameConflict => 'nameConflict',
         DatabaseAttachmentStatus.unknown => 'unknown',
       },
     };

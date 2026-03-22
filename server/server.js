@@ -197,6 +197,8 @@ EXEC master.dbo.sp_detach_db @dbname = N'${databaseString}';
 
 function buildAttachmentStatusQuery(payload) {
   const databaseString = escapeSqlString(payload.databaseName);
+  const mdfPath = escapeSqlString(String(payload.mdfPath || '').replace(/\//g, '\\'));
+  const ldfPath = escapeSqlString(String(payload.ldfPath || '').replace(/\//g, '\\'));
   return `
 SET NOCOUNT ON;
 IF DB_ID(N'${databaseString}') IS NULL
@@ -205,7 +207,33 @@ BEGIN
 END
 ELSE
 BEGIN
-    PRINT '__ATTACHED__';
+    DECLARE @expectedMdf NVARCHAR(4000) = LOWER(N'${mdfPath}');
+    DECLARE @expectedLdf NVARCHAR(4000) = LOWER(N'${ldfPath}');
+
+    IF EXISTS (
+        SELECT 1
+        FROM sys.master_files
+        WHERE database_id = DB_ID(N'${databaseString}')
+          AND type_desc = 'ROWS'
+          AND LOWER(physical_name) = @expectedMdf
+    )
+    AND (
+        @expectedLdf = ''
+        OR EXISTS (
+            SELECT 1
+            FROM sys.master_files
+            WHERE database_id = DB_ID(N'${databaseString}')
+              AND type_desc = 'LOG'
+              AND LOWER(physical_name) = @expectedLdf
+        )
+    )
+    BEGIN
+        PRINT '__ATTACHED__';
+    END
+    ELSE
+    BEGIN
+        PRINT '__NAME_CONFLICT__';
+    END
 END
 `;
 }
@@ -305,6 +333,10 @@ async function resolveAttachmentStatus(profile) {
 
   if (result.message.includes('__DETACHED__')) {
     return 'detached';
+  }
+
+  if (result.message.includes('__NAME_CONFLICT__')) {
+    return 'nameConflict';
   }
 
   return 'unknown';
