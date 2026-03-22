@@ -21,7 +21,7 @@ class ApiClient {
   Future<String> fetchHealthMessage() async {
     final uri = _buildUri('/health');
     if (uri == null) {
-      throw Exception('Enter the API base URL first.');
+      throw Exception('API connection is not configured.');
     }
 
     final response = await http.get(uri);
@@ -32,7 +32,7 @@ class ApiClient {
   Future<List<DatabaseProfile>> fetchProfiles() async {
     final uri = _buildUri('/api/settings/profiles');
     if (uri == null) {
-      throw Exception('Enter the API base URL first.');
+      throw Exception('API connection is not configured.');
     }
 
     final response = await http.get(uri);
@@ -53,7 +53,7 @@ class ApiClient {
     if (uri == null) {
       return const OperationResult(
         success: false,
-        message: 'Enter the API base URL first.',
+        message: 'API connection is not configured.',
         command: '',
       );
     }
@@ -69,8 +69,8 @@ class ApiClient {
     } catch (error) {
       return OperationResult(
         success: false,
-        message: 'Could not reach API at $baseUrl. Details: $error',
-        command: 'DELETE $uri',
+        message: 'Could not reach the API server. Details: $error',
+        command: '',
       );
     }
   }
@@ -80,7 +80,7 @@ class ApiClient {
     if (uri == null) {
       return const OperationResult(
         success: false,
-        message: 'Enter the API base URL first.',
+        message: 'API connection is not configured.',
         command: '',
       );
     }
@@ -88,9 +88,7 @@ class ApiClient {
     try {
       final response = await http.post(
         uri,
-        headers: const {
-          'Content-Type': 'application/json',
-        },
+        headers: const {'Content-Type': 'application/json'},
         body: jsonEncode(profile.toJson()),
       );
 
@@ -101,13 +99,13 @@ class ApiClient {
       return OperationResult(
         success: body['success'] == true,
         message: (body['message'] as String?) ?? 'Unexpected API response.',
-        command: (body['command'] as String?) ?? '',
+        command: '',
       );
     } catch (error) {
       return OperationResult(
         success: false,
-        message: 'Could not reach API at $baseUrl. Details: $error',
-        command: 'POST $uri',
+        message: 'Could not reach the API server. Details: $error',
+        command: '',
       );
     }
   }

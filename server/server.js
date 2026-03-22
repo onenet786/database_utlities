@@ -425,31 +425,13 @@ const server = http.createServer(async (req, res) => {
     try {
       const profiles = await listProfiles();
       const primaryProfile = profiles[0] || null;
-      const apiHost = req.headers.host || `${HOST}:${PORT}`;
-      const publicApiAddress = API_BASE_URL && API_BASE_URL.trim().length > 0
-        ? API_BASE_URL.trim()
-        : `http://${apiHost}`;
-      const forwardedFor = req.headers['x-forwarded-for'];
-      const remoteAddress =
-        (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor?.split(',')[0]?.trim()) ||
-        req.socket.remoteAddress ||
-        'unknown';
-      const sqlServerName = primaryProfile ? primaryProfile.server : 'not configured';
       const sqlDatabaseName = primaryProfile ? primaryProfile.databaseName : 'not configured';
-      const sqlServerPort = primaryProfile && String(primaryProfile.server).includes(',')
-        ? String(primaryProfile.server).split(',').pop().trim()
-        : 'default';
 
       sendJson(res, 200, {
         success: true,
-        message: `API server ${publicApiAddress} is running. Client remote address: ${remoteAddress}. SQL Server: ${sqlServerName}. SQL port: ${sqlServerPort}. Database: ${sqlDatabaseName}.`,
-        apiServerAddress: apiHost,
-        publicApiAddress,
-        clientRemoteAddress: remoteAddress,
-        sqlServerName,
-        sqlServerPort,
+        message: `API server is running securely. Active database profile: ${sqlDatabaseName}.`,
         sqlDatabaseName,
-        storage: `mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}`,
+        storage: 'configured',
         timestamp: new Date().toISOString(),
       });
     } catch (error) {

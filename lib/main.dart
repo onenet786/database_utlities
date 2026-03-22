@@ -11,8 +11,54 @@ Future<void> main() async {
   runApp(const DatabaseUtilitiesApp());
 }
 
-class DatabaseUtilitiesApp extends StatelessWidget {
+class DatabaseUtilitiesApp extends StatefulWidget {
   const DatabaseUtilitiesApp({super.key});
+
+  @override
+  State<DatabaseUtilitiesApp> createState() => _DatabaseUtilitiesAppState();
+}
+
+class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
+    with WidgetsBindingObserver {
+  bool _isUnlocked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _lockSession();
+    }
+  }
+
+  void _unlockSession() {
+    if (!_isUnlocked) {
+      setState(() {
+        _isUnlocked = true;
+      });
+    }
+  }
+
+  void _lockSession() {
+    if (_isUnlocked) {
+      setState(() {
+        _isUnlocked = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,13 +75,17 @@ class DatabaseUtilitiesApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF4F7FB),
         useMaterial3: true,
       ),
-      home: const LaunchGatePage(),
+      home: _isUnlocked
+          ? const DatabaseUtilityHomePage()
+          : LaunchGatePage(onUnlock: _unlockSession),
     );
   }
 }
 
 class LaunchGatePage extends StatefulWidget {
-  const LaunchGatePage({super.key});
+  const LaunchGatePage({super.key, required this.onUnlock});
+
+  final VoidCallback onUnlock;
 
   @override
   State<LaunchGatePage> createState() => _LaunchGatePageState();
@@ -44,6 +94,7 @@ class LaunchGatePage extends StatefulWidget {
 class _LaunchGatePageState extends State<LaunchGatePage> {
   final _passwordController = TextEditingController();
   String? _errorMessage;
+  bool _isLaunchPasswordVisible = false;
 
   String get _expectedPassword {
     final now = DateTime.now();
@@ -82,9 +133,7 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
       return;
     }
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const DatabaseUtilityHomePage()),
-    );
+    widget.onUnlock();
   }
 
   @override
@@ -125,25 +174,33 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
                       const SizedBox(height: 24),
                       TextField(
                         controller: _passwordController,
-                        obscureText: true,
+                        obscureText: !_isLaunchPasswordVisible,
                         onSubmitted: (_) => _unlock(),
                         decoration: InputDecoration(
                           labelText: 'Launch password',
                           hintText: 'OneNet21Mar2026',
                           errorText: _errorMessage,
+                          suffixIcon: IconButton(
+                            tooltip: _isLaunchPasswordVisible
+                                ? 'Hide password'
+                                : 'Show password',
+                            onPressed: () {
+                              setState(() {
+                                _isLaunchPasswordVisible =
+                                    !_isLaunchPasswordVisible;
+                              });
+                            },
+                            icon: Icon(
+                              _isLaunchPasswordVisible
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                            ),
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(18),
                           ),
                           filled: true,
                           fillColor: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      Text(
-                        'API: ${dotenv.env['API_BASE_URL'] ?? 'Not configured'}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF4F6478),
-                          fontFamily: 'monospace',
                         ),
                       ),
                       const SizedBox(height: 18),
@@ -191,6 +248,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   String? _lastMessage;
   String? _lastCommand;
   String? _apiStatusMessage;
+  bool _isSqlPasswordVisible = false;
 
   String get _apiBaseUrl => dotenv.env['API_BASE_URL'] ?? '';
 
@@ -257,6 +315,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     _usernameController.clear();
     _passwordController.clear();
     _authenticationMode = AuthenticationMode.windows;
+    _isSqlPasswordVisible = false;
     _editingIndex = null;
     setState(() {});
   }
@@ -270,6 +329,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     _usernameController.text = profile.username;
     _passwordController.text = profile.password;
     _authenticationMode = profile.authenticationMode;
+    _isSqlPasswordVisible = false;
     _editingIndex = index;
     setState(() {});
   }
@@ -307,7 +367,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     setState(() {
       _lastMessage = result.message;
-      _lastCommand = result.command;
+      _lastCommand = null;
     });
 
     if (result.success) {
@@ -348,7 +408,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     setState(() {
       _busyIndex = null;
       _lastMessage = result.message;
-      _lastCommand = result.command;
+      _lastCommand = null;
       if (result.success && _editingIndex == index) {
         _editingIndex = null;
       } else if (result.success &&
@@ -364,6 +424,51 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   }
 
   Future<void> _attachDatabase(int index) async {
+    final profile = _profiles[index];
+    final shouldAttach = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Confirm Attach'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'You are about to attach ${profile.databaseName} to the configured SQL Server.',
+              ),
+              const SizedBox(height: 12),
+              Text('MDF: ${profile.mdfPath}'),
+              if (profile.ldfPath.trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text('LDF: ${profile.ldfPath}'),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Attach'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldAttach != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.blueGrey.shade700,
+          content: Text('Attach cancelled for ${profile.databaseName}.'),
+        ),
+      );
+      return;
+    }
+
     await _runOperation(
       index: index,
       actionLabel: 'attach',
@@ -372,6 +477,39 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   }
 
   Future<void> _detachDatabase(int index) async {
+    final profile = _profiles[index];
+    final shouldDetach = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Confirm Detach'),
+          content: Text(
+            'Detaching ${profile.databaseName} will disconnect active users and rollback uncommitted transactions. Do you want to continue?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Detach'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDetach != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.blueGrey.shade700,
+          content: Text('Detach cancelled for ${profile.databaseName}.'),
+        ),
+      );
+      return;
+    }
+
     await _runOperation(
       index: index,
       actionLabel: 'detach',
@@ -400,7 +538,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     setState(() {
       _busyIndex = null;
       _lastMessage = result.message;
-      _lastCommand = result.command;
+      _lastCommand = null;
     });
 
     if (result.success) {
@@ -518,18 +656,18 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'API base URL from .env',
+                      'Secure API Status',
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: const Color(0xFF355468),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 6),
-                    SelectableText(
-                      _apiBaseUrl,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(fontFamily: 'monospace'),
+                    Text(
+                      _apiBaseUrl.trim().isEmpty
+                          ? 'API connection is not configured.'
+                          : 'API connection is configured.',
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     if (_apiStatusMessage != null) ...[
                       const SizedBox(height: 10),
@@ -605,6 +743,12 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                   label: 'Password',
                   hint: 'Enter SQL password',
                   obscureText: true,
+                  isPasswordVisible: _isSqlPasswordVisible,
+                  onTogglePasswordVisibility: () {
+                    setState(() {
+                      _isSqlPasswordVisible = !_isSqlPasswordVisible;
+                    });
+                  },
                   validator: _requiredValidator,
                 ),
               ],
@@ -685,15 +829,6 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                       _lastMessage!,
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
-                    if (_lastCommand != null && _lastCommand!.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      SelectableText(
-                        _lastCommand!,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -772,7 +907,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    profile.server,
+                                    'Server hidden for security',
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium
@@ -906,14 +1041,27 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     required String hint,
     String? Function(String?)? validator,
     bool obscureText = false,
+    bool isPasswordVisible = false,
+    VoidCallback? onTogglePasswordVisibility,
   }) {
     return TextFormField(
       controller: controller,
       validator: validator,
-      obscureText: obscureText,
+      obscureText: obscureText && !isPasswordVisible,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
+        suffixIcon: obscureText
+            ? IconButton(
+                tooltip: isPasswordVisible ? 'Hide password' : 'Show password',
+                onPressed: onTogglePasswordVisibility,
+                icon: Icon(
+                  isPasswordVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
+              )
+            : null,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
         filled: true,
         fillColor: Colors.white,
