@@ -14,6 +14,7 @@ const MYSQL_USER = process.env.MYSQL_USER || 'root';
 const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD || '';
 const MYSQL_DATABASE = process.env.MYSQL_DATABASE || 'database_utilities';
 const API_BASE_URL = process.env.API_BASE_URL || '';
+const VALID_USER_TYPES = new Set(['admin', 'user']);
 
 let pool;
 
@@ -85,6 +86,21 @@ async function initializeStorage() {
       PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_security_settings (
+      id INT NOT NULL,
+      default_user_type VARCHAR(20) NOT NULL,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
+  await pool.query(
+    `INSERT INTO app_security_settings (id, default_user_type)
+     VALUES (1, 'admin')
+     ON DUPLICATE KEY UPDATE default_user_type = default_user_type`,
+  );
 }
 
 function sendJson(res, statusCode, payload) {
@@ -147,6 +163,10 @@ function validateProfile(payload) {
   }
 
   return missing;
+}
+
+function normalizeUserType(value) {
+  return VALID_USER_TYPES.has(value) ? value : 'admin';
 }
 
 function buildAttachQuery(payload) {
@@ -368,6 +388,33 @@ async function listProfiles() {
   );
 }
 
+async function getSecurityPreference() {
+  const [rows] = await pool.query(
+    `SELECT default_user_type
+     FROM app_security_settings
+     WHERE id = 1
+     LIMIT 1`,
+  );
+
+  return {
+    defaultUserType: normalizeUserType(rows[0]?.default_user_type),
+  };
+}
+
+async function saveSecurityPreference(payload) {
+  const defaultUserType = String(payload.defaultUserType || payload.default_user_type || '').trim();
+  if (!VALID_USER_TYPES.has(defaultUserType)) {
+    throw new Error('Invalid user type. Allowed values: admin, user.');
+  }
+
+  await pool.query(
+    `INSERT INTO app_security_settings (id, default_user_type)
+     VALUES (1, ?)
+     ON DUPLICATE KEY UPDATE default_user_type = VALUES(default_user_type)`,
+    [defaultUserType],
+  );
+}
+
 async function saveProfile(payload) {
   const values = [
     payload.server,
@@ -454,6 +501,39 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 500, {
         success: false,
         message: error.message || 'Could not load profiles from MySQL.',
+      });
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/security/preferences') {
+    try {
+      const preference = await getSecurityPreference();
+      sendJson(res, 200, {
+        success: true,
+        ...preference,
+      });
+    } catch (error) {
+      sendJson(res, 500, {
+        success: false,
+        message: error.message || 'Could not load security preference.',
+      });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/security/preferences') {
+    try {
+      const payload = await readJsonBody(req);
+      await saveSecurityPreference(payload);
+      sendJson(res, 200, {
+        success: true,
+        message: 'Security preference saved successfully.',
+      });
+    } catch (error) {
+      sendJson(res, 400, {
+        success: false,
+        message: error.message || 'Could not save security preference.',
       });
     }
     return;

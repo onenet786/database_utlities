@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import 'database_profile.dart';
 import 'operation_result.dart';
+import 'security_preference.dart';
 
 class ApiClient {
   ApiClient({required this.baseUrl});
@@ -27,6 +28,36 @@ class ApiClient {
     final response = await http.get(uri);
     final body = _decodeBody(response.body);
     return (body['message'] as String?) ?? 'API is reachable.';
+  }
+
+  Future<SecurityPreference> fetchSecurityPreference() async {
+    final uri = _buildUri('/api/security/preferences');
+    if (uri == null) {
+      throw Exception('API connection is not configured.');
+    }
+
+    final response = await http.get(uri);
+    final body = _decodeBody(response.body);
+    return SecurityPreference.fromJson(body);
+  }
+
+  Future<void> saveSecurityPreference(SecurityPreference preference) async {
+    final uri = _buildUri('/api/security/preferences');
+    if (uri == null) {
+      throw Exception('API connection is not configured.');
+    }
+
+    final response = await http.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(preference.toJson()),
+    );
+    final body = _decodeBody(response.body);
+    if (body['success'] != true) {
+      throw Exception(
+        (body['message'] as String?) ?? 'Could not save security preference.',
+      );
+    }
   }
 
   Future<List<DatabaseProfile>> fetchProfiles() async {
