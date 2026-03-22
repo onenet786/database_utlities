@@ -83,9 +83,7 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
     }
 
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) => const DatabaseUtilityHomePage(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const DatabaseUtilityHomePage()),
     );
   }
 
@@ -111,7 +109,8 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
                     children: [
                       Text(
                         'Launch Security',
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
                               fontWeight: FontWeight.w700,
                               color: const Color(0xFF0A2540),
                             ),
@@ -120,8 +119,8 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
                       Text(
                         'Enter today\'s password in the format `OneNetDDMMMyyyy` to open the app.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: const Color(0xFF4F6478),
-                            ),
+                          color: const Color(0xFF4F6478),
+                        ),
                       ),
                       const SizedBox(height: 24),
                       TextField(
@@ -143,9 +142,9 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
                       Text(
                         'API: ${dotenv.env['API_BASE_URL'] ?? 'Not configured'}',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFF4F6478),
-                              fontFamily: 'monospace',
-                            ),
+                          color: const Color(0xFF4F6478),
+                          fontFamily: 'monospace',
+                        ),
                       ),
                       const SizedBox(height: 18),
                       SizedBox(
@@ -171,7 +170,8 @@ class DatabaseUtilityHomePage extends StatefulWidget {
   const DatabaseUtilityHomePage({super.key});
 
   @override
-  State<DatabaseUtilityHomePage> createState() => _DatabaseUtilityHomePageState();
+  State<DatabaseUtilityHomePage> createState() =>
+      _DatabaseUtilityHomePageState();
 }
 
 class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
@@ -191,7 +191,6 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   String? _lastMessage;
   String? _lastCommand;
   String? _apiStatusMessage;
-  final Set<int> _attachedProfileIds = <int>{};
 
   String get _apiBaseUrl => dotenv.env['API_BASE_URL'] ?? '';
 
@@ -280,7 +279,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       return;
     }
 
-    final existingId = _editingIndex == null ? null : _profiles[_editingIndex!].id;
+    final existingId = _editingIndex == null
+        ? null
+        : _profiles[_editingIndex!].id;
     final profile = DatabaseProfile(
       id: existingId,
       server: _serverController.text.trim(),
@@ -319,7 +320,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: result.success ? Colors.green.shade700 : Colors.red.shade700,
+        backgroundColor: result.success
+            ? Colors.green.shade700
+            : Colors.red.shade700,
         content: Text(result.message),
       ),
     );
@@ -348,7 +351,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       _lastCommand = result.command;
       if (result.success && _editingIndex == index) {
         _editingIndex = null;
-      } else if (result.success && _editingIndex != null && _editingIndex! > index) {
+      } else if (result.success &&
+          _editingIndex != null &&
+          _editingIndex! > index) {
         _editingIndex = _editingIndex! - 1;
       }
     });
@@ -382,7 +387,8 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     final profile = _profiles[index];
     setState(() {
       _busyIndex = index;
-      _lastMessage = 'Sending $actionLabel request for ${profile.databaseName}...';
+      _lastMessage =
+          'Sending $actionLabel request for ${profile.databaseName}...';
     });
 
     final result = await request(profile);
@@ -395,18 +401,34 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       _busyIndex = null;
       _lastMessage = result.message;
       _lastCommand = result.command;
-      if (result.success && profile.id != null) {
-        if (actionLabel == 'attach') {
-          _attachedProfileIds.add(profile.id!);
-        } else if (actionLabel == 'detach') {
-          _attachedProfileIds.remove(profile.id!);
-        }
-      }
     });
+
+    if (result.success) {
+      try {
+        final profiles = await _apiClient.fetchProfiles();
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _profiles = profiles;
+        });
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _lastMessage = '${result.message} Status refresh failed: $error';
+        });
+      }
+    }
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: result.success ? Colors.green.shade700 : Colors.red.shade700,
+        backgroundColor: result.success
+            ? Colors.green.shade700
+            : Colors.red.shade700,
         content: Text(result.message),
       ),
     );
@@ -415,9 +437,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   @override
   Widget build(BuildContext context) {
     final headline = Theme.of(context).textTheme.headlineMedium?.copyWith(
-          fontWeight: FontWeight.w700,
-          color: const Color(0xFF0A2540),
-        );
+      fontWeight: FontWeight.w700,
+      color: const Color(0xFF0A2540),
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -480,8 +502,8 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
               Text(
                 'These settings are saved in MySQL through the backend API and loaded again when the app starts.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: const Color(0xFF4F6478),
-                    ),
+                  color: const Color(0xFF4F6478),
+                ),
               ),
               const SizedBox(height: 24),
               Container(
@@ -498,24 +520,24 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                     Text(
                       'API base URL from .env',
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            color: const Color(0xFF355468),
-                            fontWeight: FontWeight.w700,
-                          ),
+                        color: const Color(0xFF355468),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 6),
                     SelectableText(
                       _apiBaseUrl,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontFamily: 'monospace',
-                          ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(fontFamily: 'monospace'),
                     ),
                     if (_apiStatusMessage != null) ...[
                       const SizedBox(height: 10),
                       Text(
                         _apiStatusMessage!,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFF4F6478),
-                            ),
+                          color: const Color(0xFF4F6478),
+                        ),
                       ),
                     ],
                   ],
@@ -594,9 +616,13 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                   FilledButton.icon(
                     onPressed: _saveProfile,
                     icon: Icon(
-                      _editingIndex == null ? Icons.add_circle_outline : Icons.save_outlined,
+                      _editingIndex == null
+                          ? Icons.add_circle_outline
+                          : Icons.save_outlined,
                     ),
-                    label: Text(_editingIndex == null ? 'Save Setting' : 'Update Setting'),
+                    label: Text(
+                      _editingIndex == null ? 'Save Setting' : 'Update Setting',
+                    ),
                   ),
                   OutlinedButton.icon(
                     onPressed: _clearForm,
@@ -638,9 +664,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
             const SizedBox(height: 8),
             Text(
               'These profiles are stored in MySQL and can be used for attach and detach operations.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF4F6478),
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4F6478)),
             ),
             const SizedBox(height: 20),
             if (_lastMessage != null) ...[
@@ -655,14 +681,17 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_lastMessage!, style: Theme.of(context).textTheme.bodyMedium),
+                    Text(
+                      _lastMessage!,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
                     if (_lastCommand != null && _lastCommand!.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       SelectableText(
                         _lastCommand!,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              fontFamily: 'monospace',
-                            ),
+                          fontFamily: 'monospace',
+                        ),
                       ),
                     ],
                   ],
@@ -699,7 +728,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                   final profile = _profiles[index];
                   final isBusy = _busyIndex == index;
                   final isAttached =
-                      profile.id != null && _attachedProfileIds.contains(profile.id);
+                      profile.attachmentStatus ==
+                      DatabaseAttachmentStatus.attached;
+                  final isDetached =
+                      profile.attachmentStatus ==
+                      DatabaseAttachmentStatus.detached;
                   final gradientColors = isAttached
                       ? const [Color(0xFF1F9D55), Color(0xFF14532D)]
                       : const [Color(0xFF0E7490), Color(0xFF164E63)];
@@ -724,7 +757,10 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                 children: [
                                   Text(
                                     profile.databaseName,
-                                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleLarge
+                                        ?.copyWith(
                                           color: Colors.white,
                                           fontWeight: FontWeight.w700,
                                         ),
@@ -732,9 +768,10 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                   const SizedBox(height: 4),
                                   Text(
                                     profile.server,
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                          color: Colors.white70,
-                                        ),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(color: Colors.white70),
                                   ),
                                   const SizedBox(height: 8),
                                   Container(
@@ -745,7 +782,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                     decoration: BoxDecoration(
                                       color: isAttached
                                           ? Colors.white.withValues(alpha: 0.18)
-                                          : Colors.white.withValues(alpha: 0.12),
+                                          : Colors.white.withValues(
+                                              alpha: 0.12,
+                                            ),
                                       borderRadius: BorderRadius.circular(999),
                                       border: Border.all(
                                         color: isAttached
@@ -754,8 +793,18 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                       ),
                                     ),
                                     child: Text(
-                                      isAttached ? 'Attached' : 'Detached / Unknown',
-                                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                      switch (profile.attachmentStatus) {
+                                        DatabaseAttachmentStatus.attached =>
+                                          'Attached',
+                                        DatabaseAttachmentStatus.detached =>
+                                          'Detached',
+                                        DatabaseAttachmentStatus.unknown =>
+                                          'Unknown',
+                                      },
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelMedium
+                                          ?.copyWith(
                                             color: Colors.white,
                                             fontWeight: FontWeight.w700,
                                           ),
@@ -766,13 +815,17 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                             ),
                             IconButton(
                               tooltip: 'Edit setting',
-                              onPressed: isBusy ? null : () => _loadProfileForEditing(index),
+                              onPressed: isBusy
+                                  ? null
+                                  : () => _loadProfileForEditing(index),
                               color: Colors.white,
                               icon: const Icon(Icons.edit_outlined),
                             ),
                             IconButton(
                               tooltip: 'Delete setting',
-                              onPressed: isBusy ? null : () => _deleteProfile(index),
+                              onPressed: isBusy
+                                  ? null
+                                  : () => _deleteProfile(index),
                               color: Colors.white,
                               icon: const Icon(Icons.delete_outline),
                             ),
@@ -787,7 +840,8 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                         const SizedBox(height: 8),
                         _infoLine(
                           'Auth',
-                          profile.authenticationMode == AuthenticationMode.windows
+                          profile.authenticationMode ==
+                                  AuthenticationMode.windows
                               ? 'Windows Authentication'
                               : 'SQL Server Login (${profile.username})',
                         ),
@@ -801,12 +855,16 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                 backgroundColor: Colors.white,
                                 foregroundColor: const Color(0xFF0E7490),
                               ),
-                              onPressed: isBusy ? null : () => _attachDatabase(index),
+                              onPressed: isBusy || isAttached
+                                  ? null
+                                  : () => _attachDatabase(index),
                               icon: isBusy
                                   ? const SizedBox(
                                       width: 16,
                                       height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
                                     )
                                   : const Icon(Icons.link),
                               label: const Text('Attach'),
@@ -816,7 +874,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                 foregroundColor: Colors.white,
                                 side: const BorderSide(color: Colors.white70),
                               ),
-                              onPressed: isBusy ? null : () => _detachDatabase(index),
+                              onPressed: isBusy || isDetached
+                                  ? null
+                                  : () => _detachDatabase(index),
                               icon: const Icon(Icons.link_off),
                               label: const Text('Detach'),
                             ),
@@ -847,9 +907,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
         filled: true,
         fillColor: Colors.white,
       ),

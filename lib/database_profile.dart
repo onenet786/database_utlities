@@ -1,5 +1,7 @@
 enum AuthenticationMode { windows, sqlServer }
 
+enum DatabaseAttachmentStatus { attached, detached, unknown }
+
 class DatabaseProfile {
   DatabaseProfile({
     this.id,
@@ -7,6 +9,7 @@ class DatabaseProfile {
     required this.databaseName,
     required this.mdfPath,
     required this.authenticationMode,
+    this.attachmentStatus = DatabaseAttachmentStatus.unknown,
     this.ldfPath = '',
     this.username = '',
     this.password = '',
@@ -20,15 +23,23 @@ class DatabaseProfile {
   final AuthenticationMode authenticationMode;
   final String username;
   final String password;
+  final DatabaseAttachmentStatus attachmentStatus;
 
   factory DatabaseProfile.fromJson(Map<String, dynamic> json) {
     final authenticationModeValue =
-        (json['authenticationMode'] ?? json['authentication_mode'] ?? 'windows').toString();
+        (json['authenticationMode'] ?? json['authentication_mode'] ?? 'windows')
+            .toString();
+    final attachmentStatusValue =
+        (json['attachmentStatus'] ?? json['attachment_status'] ?? 'unknown')
+            .toString();
 
     return DatabaseProfile(
-      id: json['id'] is int ? json['id'] as int : int.tryParse('${json['id'] ?? ''}'),
+      id: json['id'] is int
+          ? json['id'] as int
+          : int.tryParse('${json['id'] ?? ''}'),
       server: (json['server'] ?? '').toString(),
-      databaseName: (json['databaseName'] ?? json['database_name'] ?? '').toString(),
+      databaseName: (json['databaseName'] ?? json['database_name'] ?? '')
+          .toString(),
       mdfPath: (json['mdfPath'] ?? json['mdf_path'] ?? '').toString(),
       ldfPath: (json['ldfPath'] ?? json['ldf_path'] ?? '').toString(),
       authenticationMode: authenticationModeValue == 'sqlServer'
@@ -36,6 +47,11 @@ class DatabaseProfile {
           : AuthenticationMode.windows,
       username: (json['username'] ?? '').toString(),
       password: (json['password'] ?? '').toString(),
+      attachmentStatus: switch (attachmentStatusValue) {
+        'attached' => DatabaseAttachmentStatus.attached,
+        'detached' => DatabaseAttachmentStatus.detached,
+        _ => DatabaseAttachmentStatus.unknown,
+      },
     );
   }
 
@@ -46,10 +62,16 @@ class DatabaseProfile {
       'databaseName': databaseName,
       'mdfPath': mdfPath,
       'ldfPath': ldfPath,
-      'authenticationMode':
-          authenticationMode == AuthenticationMode.windows ? 'windows' : 'sqlServer',
+      'authenticationMode': authenticationMode == AuthenticationMode.windows
+          ? 'windows'
+          : 'sqlServer',
       'username': username,
       'password': password,
+      'attachmentStatus': switch (attachmentStatus) {
+        DatabaseAttachmentStatus.attached => 'attached',
+        DatabaseAttachmentStatus.detached => 'detached',
+        DatabaseAttachmentStatus.unknown => 'unknown',
+      },
     };
   }
 
@@ -62,6 +84,7 @@ class DatabaseProfile {
     AuthenticationMode? authenticationMode,
     String? username,
     String? password,
+    DatabaseAttachmentStatus? attachmentStatus,
   }) {
     return DatabaseProfile(
       id: id ?? this.id,
@@ -72,6 +95,7 @@ class DatabaseProfile {
       authenticationMode: authenticationMode ?? this.authenticationMode,
       username: username ?? this.username,
       password: password ?? this.password,
+      attachmentStatus: attachmentStatus ?? this.attachmentStatus,
     );
   }
 }

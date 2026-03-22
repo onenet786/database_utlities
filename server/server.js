@@ -192,6 +192,21 @@ BEGIN
 END
 ALTER DATABASE [${databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
 EXEC master.dbo.sp_detach_db @dbname = N'${databaseString}';
+  `;
+}
+
+function buildAttachmentStatusQuery(payload) {
+  const databaseString = escapeSqlString(payload.databaseName);
+  return `
+SET NOCOUNT ON;
+IF DB_ID(N'${databaseString}') IS NULL
+BEGIN
+    PRINT '__DETACHED__';
+END
+ELSE
+BEGIN
+    PRINT '__ATTACHED__';
+END
 `;
 }
 
@@ -278,6 +293,23 @@ function runSqlcmd(payload, query) {
   });
 }
 
+async function resolveAttachmentStatus(profile) {
+  const result = await runSqlcmd(profile, buildAttachmentStatusQuery(profile));
+  if (!result.success) {
+    return 'unknown';
+  }
+
+  if (result.message.includes('__ATTACHED__')) {
+    return 'attached';
+  }
+
+  if (result.message.includes('__DETACHED__')) {
+    return 'detached';
+  }
+
+  return 'unknown';
+}
+
 async function listProfiles() {
   const [rows] = await pool.query(
     `SELECT id, server, database_name, mdf_path, ldf_path, authentication_mode, username, password
@@ -285,7 +317,7 @@ async function listProfiles() {
      ORDER BY id DESC`,
   );
 
-  return rows.map((row) => ({
+  const profiles = rows.map((row) => ({
     id: row.id,
     server: row.server,
     databaseName: row.database_name,
@@ -295,6 +327,13 @@ async function listProfiles() {
     username: row.username || '',
     password: row.password || '',
   }));
+
+  return Promise.all(
+    profiles.map(async (profile) => ({
+      ...profile,
+      attachmentStatus: await resolveAttachmentStatus(profile),
+    })),
+  );
 }
 
 async function saveProfile(payload) {
