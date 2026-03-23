@@ -193,13 +193,13 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
       title: 'OneNet System Tools',
       theme: ThemeData(
         colorScheme: colorScheme,
-        scaffoldBackgroundColor: const Color(0xFFF3F6F8),
+        scaffoldBackgroundColor: const Color(0xFFD7E1E7),
         useMaterial3: true,
         snackBarTheme: const SnackBarThemeData(
           behavior: SnackBarBehavior.floating,
         ),
         cardTheme: CardThemeData(
-          color: Colors.white,
+          color: const Color(0xFFEDF2F5),
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(28),
@@ -373,7 +373,7 @@ class LaunchGatePage extends StatefulWidget {
 }
 
 class _LaunchGatePageState extends State<LaunchGatePage> {
-  final _usernameController = TextEditingController(text: 'user');
+  final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final ApiClient _apiClient = ApiClient(
     baseUrl: dotenv.env['API_BASE_URL'] ?? '',
@@ -1767,17 +1767,62 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     await _loadAdminData();
   }
 
+  Future<void> _showAdminClientPicker() async {
+    if (!_isAdmin || _clients.isEmpty) {
+      return;
+    }
+
+    final selectedClient = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Select Client'),
+          content: SizedBox(
+            width: 420,
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: _clients.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final client = _clients[index];
+                final isActive =
+                    client.id == (_selectedClientId ?? _clientSettings?.id);
+                return ListTile(
+                  leading: Icon(
+                    isActive
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: isActive
+                        ? const Color(0xFF0E7490)
+                        : const Color(0xFF7B8A97),
+                  ),
+                  title: Text(client.companyName),
+                  subtitle: Text(client.branchName),
+                  onTap: () => Navigator.of(dialogContext).pop(client.id),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted || selectedClient == null) {
+      return;
+    }
+    await _switchAdminClient(selectedClient);
+  }
+
   @override
   Widget build(BuildContext context) {
     final content = _isAdmin
         ? _buildAdminWorkspace(context)
         : _buildUserWorkspace(context);
-    final clientDropdownValue =
-        _clients.any(
-          (client) => client.id == (_selectedClientId ?? _clientSettings?.id),
-        )
-        ? (_selectedClientId ?? _clientSettings?.id)
-        : null;
 
     return Scaffold(
       drawer: _isAdmin ? _buildAdminDrawer(context) : null,
@@ -1785,75 +1830,8 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         titleSpacing: 20,
-        title: Row(
-          children: [
-            const AppBrandMark(size: 34),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'OneNet System Tools',
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    '${_clientSettings?.companyName ?? 'Database Utilities'} • ${_clientSettings?.branchName ?? 'Main Branch'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: const Color(0xFF4F6478),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+        title: const Text('', overflow: TextOverflow.ellipsis),
         actions: [
-          if (_isAdmin && _clients.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 170),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
-                      value: clientDropdownValue,
-                      borderRadius: BorderRadius.circular(16),
-                      isDense: true,
-                      isExpanded: true,
-                      onChanged: _switchAdminClient,
-                      selectedItemBuilder: (context) => _clients
-                          .map(
-                            (client) => Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                '${client.companyName} / ${client.branchName}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      items: _clients
-                          .map(
-                            (client) => DropdownMenuItem<int>(
-                              value: client.id,
-                              child: Text(
-                                '${client.companyName} / ${client.branchName}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ),
-                ),
-              ),
-            ),
           Padding(
             padding: const EdgeInsets.only(right: 4),
             child: Center(child: _RoleBadge(userType: widget.session.role)),
@@ -1876,7 +1854,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         child: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xFFF3F6F8), Color(0xFFF7FBFC)],
+              colors: [Color(0xFFD7E1E7), Color(0xFFC4D1D9)],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
             ),
@@ -1896,10 +1874,114 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        _buildWorkspaceIntro(title: _selectedAdminSection.title),
+        _buildWorkspaceIntro(
+          title: _selectedAdminSection.title,
+          brandLabel: _selectedAdminSection == AdminSection.dashboard
+              ? 'OneNet System Tools'
+              : null,
+        ),
         const SizedBox(height: 20),
+        if (_clients.isNotEmpty) ...[
+          _buildAdminClientSelectorCard(context),
+          const SizedBox(height: 20),
+        ],
+        if (_selectedAdminSection != AdminSection.dashboard) ...[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () {
+                setState(() {
+                  _selectedAdminSection = AdminSection.dashboard;
+                });
+              },
+              icon: const Icon(Icons.arrow_back_rounded),
+              label: const Text('Back to Dashboard'),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         _buildAdminSectionContent(headline),
       ],
+    );
+  }
+
+  Widget _buildAdminClientSelectorCard(BuildContext context) {
+    ClientSettings? activeClient;
+    final activeClientId = _selectedClientId ?? _clientSettings?.id;
+    for (final client in _clients) {
+      if (client.id == activeClientId) {
+        activeClient = client;
+        break;
+      }
+    }
+    final displayCompany = activeClient?.companyName ?? 'Select client';
+    final displayBranch = activeClient?.branchName ?? 'Tap to choose branch';
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: _showAdminClientPicker,
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD3E0E7),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.apartment_outlined,
+                  size: 18,
+                  color: Color(0xFF0E7490),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Selected Client',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF0A2540),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      displayCompany,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF113247),
+                      ),
+                    ),
+                    Text(
+                      displayBranch,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF4F6478),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 20,
+                color: Color(0xFF4F6478),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1929,43 +2011,53 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE7F4F7),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(
-                Icons.apartment_outlined,
-                color: Color(0xFF0E7490),
-              ),
-            ),
-            const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    companyName,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    'OneNet System Tools',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF0E7490),
+                      letterSpacing: 0.7,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    branchName,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: const Color(0xFF0A2540),
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 2),
                   Text(
-                    branchName,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    companyName,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: const Color(0xFF4F6478),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: const Color(0xFFD3E0E7),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.apartment_outlined,
+                size: 18,
+                color: Color(0xFF0E7490),
               ),
             ),
           ],
@@ -1974,9 +2066,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     );
   }
 
-  Widget _buildWorkspaceIntro({required String title}) {
+  Widget _buildWorkspaceIntro({required String title, String? brandLabel}) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF0E3B4D), Color(0xFF0E7490), Color(0xFFE7A06A)],
@@ -1988,17 +2080,41 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AppBrandMark(size: 58, compact: true),
-          const SizedBox(width: 18),
+          const AppBrandMark(size: 38, compact: true),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (brandLabel != null) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: Text(
+                      brandLabel,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.9,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 Text(
                   title,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 28,
+                    fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -2099,7 +2215,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         leading: Icon(section.icon),
         title: Text(section.label),
         selected: selected,
-        selectedTileColor: const Color(0xFFE7F4F7),
+        selectedTileColor: const Color(0xFFD3E0E7),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         onTap: () {
           setState(() {
@@ -2139,47 +2255,80 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         .length;
     final userCount = _users.where((user) => user.role == UserType.user).length;
 
-    return Column(
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Operations Overview', style: headline),
-                const SizedBox(height: 20),
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 16,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columnCount = constraints.maxWidth >= 1100
+            ? 3
+            : constraints.maxWidth >= 700
+            ? 2
+            : 1;
+        final cardWidth =
+            (constraints.maxWidth - ((columnCount - 1) * 16)) / columnCount;
+
+        return Column(
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildDashboardStatCard(
-                      title: 'Saved Databases',
-                      value: '${_profiles.length}',
-                      subtitle:
-                          '$attachedCount attached, $detachedCount detached',
-                      icon: Icons.storage_rounded,
-                    ),
-                    _buildDashboardStatCard(
-                      title: 'Users',
-                      value: '${_users.length}',
-                      subtitle: '$adminCount admins, $userCount operators',
-                      icon: Icons.groups_2_outlined,
-                    ),
-                    _buildDashboardStatCard(
-                      title: 'Activity Logs',
-                      value: '${_activityLogs.length}',
-                      subtitle:
-                          'Latest ${_activityLogs.length.clamp(0, 120)} loaded',
-                      icon: Icons.history_rounded,
+                    Text('Operations Overview', style: headline),
+                    const SizedBox(height: 20),
+                    Wrap(
+                      spacing: 16,
+                      runSpacing: 16,
+                      children: [
+                        SizedBox(
+                          width: cardWidth,
+                          child: _buildDashboardStatCard(
+                            title: 'Saved Databases',
+                            value: '${_profiles.length}',
+                            subtitle:
+                                '$attachedCount attached, $detachedCount detached',
+                            icon: Icons.storage_rounded,
+                            onTap: () => setState(() {
+                              _selectedAdminSection =
+                                  AdminSection.databaseProfiles;
+                            }),
+                          ),
+                        ),
+                        SizedBox(
+                          width: cardWidth,
+                          child: _buildDashboardStatCard(
+                            title: 'Users',
+                            value: '${_users.length}',
+                            subtitle:
+                                '$adminCount admins, $userCount operators',
+                            icon: Icons.groups_2_outlined,
+                            onTap: () => setState(() {
+                              _selectedAdminSection =
+                                  AdminSection.userManagement;
+                            }),
+                          ),
+                        ),
+                        SizedBox(
+                          width: cardWidth,
+                          child: _buildDashboardStatCard(
+                            title: 'Activity Logs',
+                            value: '${_activityLogs.length}',
+                            subtitle:
+                                'Latest ${_activityLogs.length.clamp(0, 120)} loaded',
+                            icon: Icons.history_rounded,
+                            onTap: () => setState(() {
+                              _selectedAdminSection = AdminSection.activityLogs;
+                            }),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 
@@ -2213,52 +2362,68 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     required String value,
     required String subtitle,
     required IconData icon,
+    VoidCallback? onTap,
   }) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 220, maxWidth: 280),
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: const Color(0xFFD8E2EC)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE7F4F7),
-                borderRadius: BorderRadius.circular(14),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE2EAEE),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFD8E2EC)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD3E0E7),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 18, color: const Color(0xFF0E7490)),
               ),
-              child: Icon(icon, color: const Color(0xFF0E7490)),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: const Color(0xFF0A2540),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF113247),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF4F6478),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: const Color(0xFF113247),
+              Text(
+                value,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF0A2540),
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              subtitle,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4F6478)),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -2363,7 +2528,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+                  color: const Color(0xFFE2EAEE),
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(color: const Color(0xFFD8E2EC)),
                 ),
@@ -2520,7 +2685,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       child: Container(
         width: double.infinity,
         decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
+          color: const Color(0xFFE2EAEE),
           border: Border.all(color: const Color(0xFFD8E2EC)),
           borderRadius: BorderRadius.circular(20),
         ),
@@ -2529,7 +2694,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 640),
             child: DataTable(
-              headingRowColor: WidgetStateProperty.all(const Color(0xFFE7F4F7)),
+              headingRowColor: WidgetStateProperty.all(const Color(0xFFD3E0E7)),
               columns: const [
                 DataColumn(label: Text('Company')),
                 DataColumn(label: Text('Branch')),
@@ -2708,7 +2873,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       child: Container(
         width: double.infinity,
         decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
+          color: const Color(0xFFE2EAEE),
           border: Border.all(color: const Color(0xFFD8E2EC)),
           borderRadius: BorderRadius.circular(20),
         ),
@@ -2717,7 +2882,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 640),
             child: DataTable(
-              headingRowColor: WidgetStateProperty.all(const Color(0xFFE7F4F7)),
+              headingRowColor: WidgetStateProperty.all(const Color(0xFFD3E0E7)),
               columns: const [
                 DataColumn(label: Text('Username')),
                 DataColumn(label: Text('Client')),
@@ -2787,7 +2952,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       child: Container(
         width: double.infinity,
         decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
+          color: const Color(0xFFE2EAEE),
           border: Border.all(color: const Color(0xFFD8E2EC)),
           borderRadius: BorderRadius.circular(20),
         ),
@@ -2796,7 +2961,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 980),
             child: DataTable(
-              headingRowColor: WidgetStateProperty.all(const Color(0xFFE7F4F7)),
+              headingRowColor: WidgetStateProperty.all(const Color(0xFFD3E0E7)),
               columns: const [
                 DataColumn(label: Text('User')),
                 DataColumn(label: Text('Role')),
@@ -2851,7 +3016,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+                  color: const Color(0xFFE2EAEE),
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(color: const Color(0xFFD8E2EC)),
                 ),
@@ -2872,7 +3037,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(28),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+                  color: const Color(0xFFE2EAEE),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: const Color(0xFFD8E2EC)),
                 ),
@@ -2889,6 +3054,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                 separatorBuilder: (_, _) => const SizedBox(height: 16),
                 itemBuilder: (context, index) {
                   final profile = _profiles[index];
+                  final isCompactCard = !_isAdmin;
                   final isBusy = _busyIndex == index;
                   final isAttached =
                       profile.attachmentStatus ==
@@ -2906,9 +3072,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                       : const [Color(0xFF0C5E77), Color(0xFF143A52)];
 
                   return Container(
-                    padding: const EdgeInsets.all(20),
+                    padding: EdgeInsets.all(isCompactCard ? 10 : 20),
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(22),
+                      borderRadius: BorderRadius.circular(
+                        isCompactCard ? 16 : 22,
+                      ),
                       gradient: LinearGradient(
                         colors: gradientColors,
                         begin: Alignment.topLeft,
@@ -2919,6 +3087,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Expanded(
                               child: Column(
@@ -2928,21 +3097,24 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                     profile.databaseName,
                                     style: Theme.of(context)
                                         .textTheme
-                                        .titleLarge
+                                        .titleMedium
                                         ?.copyWith(
                                           color: Colors.white,
                                           fontWeight: FontWeight.w800,
                                         ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Server hidden for security',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyMedium
-                                        ?.copyWith(color: Colors.white70),
-                                  ),
-                                  const SizedBox(height: 10),
+                                  if (!isCompactCard) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Server hidden for security',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(color: Colors.white70),
+                                    ),
+                                    const SizedBox(height: 10),
+                                  ] else
+                                    const SizedBox(height: 6),
                                   _statusChip(profile.attachmentStatus),
                                 ],
                               ),
@@ -2990,15 +3162,22 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                 : 'SQL Server Login (${profile.username})',
                           ),
                         ],
-                        const SizedBox(height: 18),
+                        SizedBox(height: isCompactCard ? 10 : 18),
                         Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
+                          spacing: isCompactCard ? 8 : 12,
+                          runSpacing: isCompactCard ? 8 : 12,
                           children: [
                             FilledButton.icon(
                               style: FilledButton.styleFrom(
                                 backgroundColor: Colors.white,
                                 foregroundColor: const Color(0xFF0C5E77),
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: isCompactCard ? 10 : 16,
+                                  vertical: isCompactCard ? 8 : 10,
+                                ),
+                                visualDensity: isCompactCard
+                                    ? VisualDensity.compact
+                                    : VisualDensity.standard,
                               ),
                               onPressed: isBusy || isAttached || hasNameConflict
                                   ? null
@@ -3012,29 +3191,58 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                       ),
                                     )
                                   : const Icon(Icons.link),
-                              label: const Text('Attach'),
+                              label: Text(
+                                'Attach',
+                                style: TextStyle(
+                                  fontSize: isCompactCard ? 12 : 14,
+                                ),
+                              ),
                             ),
                             OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: Colors.white,
                                 side: const BorderSide(color: Colors.white70),
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: isCompactCard ? 10 : 16,
+                                  vertical: isCompactCard ? 8 : 10,
+                                ),
+                                visualDensity: isCompactCard
+                                    ? VisualDensity.compact
+                                    : VisualDensity.standard,
                               ),
                               onPressed: isBusy || hasNameConflict
                                   ? null
                                   : () => _backupDatabase(index),
                               icon: const Icon(Icons.save_alt_outlined),
-                              label: const Text('Backup'),
+                              label: Text(
+                                'Backup',
+                                style: TextStyle(
+                                  fontSize: isCompactCard ? 12 : 14,
+                                ),
+                              ),
                             ),
                             OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: Colors.white,
                                 side: const BorderSide(color: Colors.white70),
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: isCompactCard ? 10 : 16,
+                                  vertical: isCompactCard ? 8 : 10,
+                                ),
+                                visualDensity: isCompactCard
+                                    ? VisualDensity.compact
+                                    : VisualDensity.standard,
                               ),
                               onPressed: isBusy || isDetached || hasNameConflict
                                   ? null
                                   : () => _detachDatabase(index),
                               icon: const Icon(Icons.link_off),
-                              label: const Text('Detach'),
+                              label: Text(
+                                'Detach',
+                                style: TextStyle(
+                                  fontSize: isCompactCard ? 12 : 14,
+                                ),
+                              ),
                             ),
                           ],
                         ),
