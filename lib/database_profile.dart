@@ -5,21 +5,25 @@ enum DatabaseAttachmentStatus { attached, detached, nameConflict, unknown }
 class DatabaseProfile {
   DatabaseProfile({
     this.id,
+    this.clientId,
     required this.server,
     required this.databaseName,
     required this.mdfPath,
     required this.authenticationMode,
     this.attachmentStatus = DatabaseAttachmentStatus.unknown,
     this.ldfPath = '',
+    this.backupDirectory = '',
     this.username = '',
     this.password = '',
   });
 
   final int? id;
+  final int? clientId;
   final String server;
   final String databaseName;
   final String mdfPath;
   final String ldfPath;
+  final String backupDirectory;
   final AuthenticationMode authenticationMode;
   final String username;
   final String password;
@@ -37,11 +41,17 @@ class DatabaseProfile {
       id: json['id'] is int
           ? json['id'] as int
           : int.tryParse('${json['id'] ?? ''}'),
+      clientId: json['clientId'] is int
+          ? json['clientId'] as int
+          : int.tryParse('${json['clientId'] ?? json['client_id'] ?? ''}'),
       server: (json['server'] ?? '').toString(),
       databaseName: (json['databaseName'] ?? json['database_name'] ?? '')
           .toString(),
       mdfPath: (json['mdfPath'] ?? json['mdf_path'] ?? '').toString(),
       ldfPath: (json['ldfPath'] ?? json['ldf_path'] ?? '').toString(),
+      backupDirectory:
+          (json['backupDirectory'] ?? json['backup_directory'] ?? '')
+              .toString(),
       authenticationMode: authenticationModeValue == 'sqlServer'
           ? AuthenticationMode.sqlServer
           : AuthenticationMode.windows,
@@ -59,10 +69,12 @@ class DatabaseProfile {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'clientId': clientId,
       'server': server,
       'databaseName': databaseName,
       'mdfPath': mdfPath,
       'ldfPath': ldfPath,
+      'backupDirectory': backupDirectory,
       'authenticationMode': authenticationMode == AuthenticationMode.windows
           ? 'windows'
           : 'sqlServer',
@@ -79,10 +91,12 @@ class DatabaseProfile {
 
   DatabaseProfile copyWith({
     int? id,
+    int? clientId,
     String? server,
     String? databaseName,
     String? mdfPath,
     String? ldfPath,
+    String? backupDirectory,
     AuthenticationMode? authenticationMode,
     String? username,
     String? password,
@@ -90,10 +104,12 @@ class DatabaseProfile {
   }) {
     return DatabaseProfile(
       id: id ?? this.id,
+      clientId: clientId ?? this.clientId,
       server: server ?? this.server,
       databaseName: databaseName ?? this.databaseName,
       mdfPath: mdfPath ?? this.mdfPath,
       ldfPath: ldfPath ?? this.ldfPath,
+      backupDirectory: backupDirectory ?? this.backupDirectory,
       authenticationMode: authenticationMode ?? this.authenticationMode,
       username: username ?? this.username,
       password: password ?? this.password,
