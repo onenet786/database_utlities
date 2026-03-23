@@ -216,8 +216,12 @@ class ApiClient {
     );
   }
 
-  Future<List<AppUser>> fetchUsers({required int clientId}) async {
-    final uri = _buildUri('/api/security/users?clientId=$clientId');
+  Future<List<AppUser>> fetchUsers({
+    int? clientId,
+    bool includeAllClients = false,
+  }) async {
+    final query = includeAllClients ? 'scope=all' : 'clientId=${clientId ?? 1}';
+    final uri = _buildUri('/api/security/users?$query');
     if (uri == null) {
       throw Exception('API connection is not configured.');
     }

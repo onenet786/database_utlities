@@ -701,7 +701,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     try {
       final clients = await _apiClient.fetchClientSettingsList();
-      final users = await _apiClient.fetchUsers(clientId: _activeClientId);
+      final users = await _apiClient.fetchUsers(includeAllClients: true);
       final activityLogs = await _apiClient.fetchActivityLogs(
         clientId: _activeClientId,
         limit: 120,
@@ -878,7 +878,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     final result = await _apiClient.deleteUser(
       user.id!,
-      clientId: _activeClientId,
+      clientId: user.clientId ?? _activeClientId,
       actorUsername: widget.session.username,
       actorRole: _roleValue(widget.session.role),
     );
@@ -1911,7 +1911,66 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     return ListView(
       padding: const EdgeInsets.all(20),
-      children: [_buildProfilesPanel(headline)],
+      children: [
+        _buildAssignedClientPanel(context),
+        const SizedBox(height: 20),
+        _buildProfilesPanel(headline),
+      ],
+    );
+  }
+
+  Widget _buildAssignedClientPanel(BuildContext context) {
+    final companyName = _clientSettings?.companyName.trim().isNotEmpty == true
+        ? _clientSettings!.companyName
+        : 'Unassigned client';
+    final branchName = _clientSettings?.branchName.trim().isNotEmpty == true
+        ? _clientSettings!.branchName
+        : 'No branch selected';
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE7F4F7),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(
+                Icons.apartment_outlined,
+                color: Color(0xFF0E7490),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    companyName,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF0A2540),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    branchName,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: const Color(0xFF4F6478),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

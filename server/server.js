@@ -646,15 +646,22 @@ async function saveClientSettings(payload) {
 }
 
 async function listUsers(clientId) {
-  const [rows] = await pool.query(
-    `SELECT u.id, u.username, u.role, u.client_id, u.created_at, u.updated_at,
-            c.company_name, c.branch_name
-     FROM app_users u
-     LEFT JOIN app_client_settings c ON c.id = u.client_id
-     WHERE u.client_id = ?
-     ORDER BY username ASC`,
-    [clientId],
-  );
+  const hasClientFilter = Number.isInteger(clientId) && clientId > 0;
+  const query = hasClientFilter
+    ? `SELECT u.id, u.username, u.role, u.client_id, u.created_at, u.updated_at,
+              c.company_name, c.branch_name
+       FROM app_users u
+       LEFT JOIN app_client_settings c ON c.id = u.client_id
+       WHERE u.client_id = ?
+       ORDER BY username ASC`
+    : `SELECT u.id, u.username, u.role, u.client_id, u.created_at, u.updated_at,
+              c.company_name, c.branch_name
+       FROM app_users u
+       LEFT JOIN app_client_settings c ON c.id = u.client_id
+       ORDER BY username ASC`;
+  const [rows] = hasClientFilter
+    ? await pool.query(query, [clientId])
+    : await pool.query(query);
 
   return rows.map((row) => ({
     id: row.id,
@@ -1145,9 +1152,11 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/api/security/users')) {
     try {
       const requestUrl = new URL(req.url, 'http://localhost');
-      const users = await listUsers(
-        parseClientId(requestUrl.searchParams.get('clientId')),
-      );
+      const scope = String(requestUrl.searchParams.get('scope') || '').trim().toLowerCase();
+      const clientId = scope === 'all'
+        ? null
+        : parseClientId(requestUrl.searchParams.get('clientId'));
+      const users = await listUsers(clientId);
       sendJson(res, 200, {
         success: true,
         users,
