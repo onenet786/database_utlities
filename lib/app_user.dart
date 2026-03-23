@@ -5,12 +5,18 @@ class AppUser {
     this.id,
     required this.username,
     required this.role,
+    this.clientId,
+    this.clientName = '',
+    this.branchName = '',
     this.password = '',
   });
 
   final int? id;
   final String username;
   final UserType role;
+  final int? clientId;
+  final String clientName;
+  final String branchName;
   final String password;
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
@@ -21,6 +27,11 @@ class AppUser {
           : int.tryParse('${json['id'] ?? ''}'),
       username: (json['username'] ?? '').toString(),
       role: roleValue == 'admin' ? UserType.admin : UserType.user,
+      clientId: json['clientId'] is int
+          ? json['clientId'] as int
+          : int.tryParse('${json['clientId'] ?? json['client_id'] ?? ''}'),
+      clientName: (json['clientName'] ?? json['client_name'] ?? '').toString(),
+      branchName: (json['branchName'] ?? json['branch_name'] ?? '').toString(),
     );
   }
 
@@ -29,6 +40,7 @@ class AppUser {
       'id': id,
       'username': username,
       'role': role == UserType.admin ? 'admin' : 'user',
+      'clientId': clientId,
       'password': password,
     };
   }

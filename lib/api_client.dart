@@ -39,6 +39,20 @@ class ApiClient {
     });
   }
 
+  Future<OperationResult> backupDatabase(
+    DatabaseProfile profile, {
+    required String backupPath,
+    required String actorUsername,
+    required String actorRole,
+  }) {
+    return _postJson('/api/databases/backup', {
+      ...profile.toJson(),
+      'backupPath': backupPath,
+      'actorUsername': actorUsername,
+      'actorRole': actorRole,
+    });
+  }
+
   Future<SecurityPreference> fetchSecurityPreference() async {
     final uri = _buildUri('/api/security/preferences');
     if (uri == null) {
@@ -147,8 +161,8 @@ class ApiClient {
     );
   }
 
-  Future<List<AppUser>> fetchUsers() async {
-    final uri = _buildUri('/api/security/users');
+  Future<List<AppUser>> fetchUsers({required int clientId}) async {
+    final uri = _buildUri('/api/security/users?clientId=$clientId');
     if (uri == null) {
       throw Exception('API connection is not configured.');
     }
@@ -162,11 +176,13 @@ class ApiClient {
 
   Future<OperationResult> saveUser({
     required AppUser user,
+    required int clientId,
     required String actorUsername,
     required String actorRole,
   }) async {
     return _postJson('/api/security/users', {
       ...user.toJson(),
+      'clientId': clientId,
       'actorUsername': actorUsername,
       'actorRole': actorRole,
     });
@@ -188,11 +204,12 @@ class ApiClient {
 
   Future<OperationResult> deleteUser(
     int id, {
+    required int clientId,
     required String actorUsername,
     required String actorRole,
   }) async {
     final uri = _buildUri(
-      '/api/security/users/$id?actorUsername=${Uri.encodeQueryComponent(actorUsername)}&actorRole=${Uri.encodeQueryComponent(actorRole)}',
+      '/api/security/users/$id?clientId=$clientId&actorUsername=${Uri.encodeQueryComponent(actorUsername)}&actorRole=${Uri.encodeQueryComponent(actorRole)}',
     );
     if (uri == null) {
       return const OperationResult(
@@ -219,8 +236,11 @@ class ApiClient {
     }
   }
 
-  Future<List<ActivityLogEntry>> fetchActivityLogs({int limit = 100}) async {
-    final uri = _buildUri('/api/activity-logs?limit=$limit');
+  Future<List<ActivityLogEntry>> fetchActivityLogs({
+    required int clientId,
+    int limit = 100,
+  }) async {
+    final uri = _buildUri('/api/activity-logs?clientId=$clientId&limit=$limit');
     if (uri == null) {
       throw Exception('API connection is not configured.');
     }
@@ -236,6 +256,7 @@ class ApiClient {
   }
 
   Future<void> logActivity({
+    required int clientId,
     required String actorUsername,
     required String actorRole,
     required String actionName,
@@ -250,6 +271,7 @@ class ApiClient {
       uri,
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
+        'clientId': clientId,
         'actorUsername': actorUsername,
         'actorRole': actorRole,
         'actionName': actionName,
@@ -258,8 +280,8 @@ class ApiClient {
     );
   }
 
-  Future<List<DatabaseProfile>> fetchProfiles() async {
-    final uri = _buildUri('/api/settings/profiles');
+  Future<List<DatabaseProfile>> fetchProfiles({required int clientId}) async {
+    final uri = _buildUri('/api/settings/profiles?clientId=$clientId');
     if (uri == null) {
       throw Exception('API connection is not configured.');
     }
@@ -275,11 +297,13 @@ class ApiClient {
 
   Future<OperationResult> saveProfile(
     DatabaseProfile profile, {
+    required int clientId,
     required String actorUsername,
     required String actorRole,
   }) {
     return _postJson('/api/settings/profiles', {
       ...profile.toJson(),
+      'clientId': clientId,
       'actorUsername': actorUsername,
       'actorRole': actorRole,
     });
@@ -287,11 +311,12 @@ class ApiClient {
 
   Future<OperationResult> deleteProfile(
     int id, {
+    required int clientId,
     required String actorUsername,
     required String actorRole,
   }) async {
     final uri = _buildUri(
-      '/api/settings/profiles/$id?actorUsername=${Uri.encodeQueryComponent(actorUsername)}&actorRole=${Uri.encodeQueryComponent(actorRole)}',
+      '/api/settings/profiles/$id?clientId=$clientId&actorUsername=${Uri.encodeQueryComponent(actorUsername)}&actorRole=${Uri.encodeQueryComponent(actorRole)}',
     );
     if (uri == null) {
       return const OperationResult(

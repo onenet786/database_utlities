@@ -12,6 +12,8 @@ import 'database_profile.dart';
 import 'operation_result.dart';
 import 'security_preference.dart';
 
+enum _DetachAction { cancel, detachOnly, backupAndDetach }
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
@@ -81,6 +83,7 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
     if (session != null) {
       unawaited(
         _apiClient.logActivity(
+          clientId: session.clientId,
           actorUsername: session.username,
           actorRole: session.role == UserType.admin ? 'admin' : 'user',
           actionName: 'lock_session',
@@ -527,11 +530,15 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   ApiClient get _apiClient =>
       ApiClient(baseUrl: dotenv.env['API_BASE_URL'] ?? '');
   bool get _isAdmin => widget.session.role == UserType.admin;
+  int get _activeClientId => _isAdmin
+      ? (_selectedClientId ?? _clientSettings?.id ?? widget.session.clientId)
+      : widget.session.clientId;
 
   @override
   void initState() {
     super.initState();
     _clientSettings = widget.session.clientSettings;
+    _selectedClientId = widget.session.clientId;
     _companyNameController.text = widget.session.clientSettings.companyName;
     _branchNameController.text = widget.session.clientSettings.branchName;
     _loadProfiles();
@@ -566,8 +573,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     try {
       final clients = await _apiClient.fetchClientSettingsList();
-      final users = await _apiClient.fetchUsers();
-      final activityLogs = await _apiClient.fetchActivityLogs(limit: 120);
+      final users = await _apiClient.fetchUsers(clientId: _activeClientId);
+      final activityLogs = await _apiClient.fetchActivityLogs(
+        clientId: _activeClientId,
+        limit: 120,
+      );
       if (!mounted) {
         return;
       }
@@ -709,6 +719,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         password: _appUserPasswordController.text,
         role: _appUserRole,
       ),
+      clientId: _activeClientId,
       actorUsername: widget.session.username,
       actorRole: _roleValue(widget.session.role),
     );
@@ -732,6 +743,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     final result = await _apiClient.deleteUser(
       user.id!,
+      clientId: _activeClientId,
       actorUsername: widget.session.username,
       actorRole: _roleValue(widget.session.role),
     );
@@ -755,7 +767,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     });
 
     try {
-      final profiles = await _apiClient.fetchProfiles();
+      final profiles = await _apiClient.fetchProfiles(
+        clientId: _activeClientId,
+      );
       if (!mounted) {
         return;
       }
@@ -821,6 +835,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         : _profiles[_editingIndex!].id;
     final profile = DatabaseProfile(
       id: existingId,
+      clientId: _activeClientId,
       server: _serverController.text.trim(),
       databaseName: _databaseNameController.text.trim(),
       mdfPath: _mdfPathController.text.trim(),
@@ -838,6 +853,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     final result = await _apiClient.saveProfile(
       profile,
+      clientId: _activeClientId,
       actorUsername: widget.session.username,
       actorRole: _roleValue(widget.session.role),
     );
@@ -877,6 +893,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     final result = await _apiClient.deleteProfile(
       profile.id!,
+      clientId: _activeClientId,
       actorUsername: widget.session.username,
       actorRole: _roleValue(widget.session.role),
     );
@@ -899,6 +916,85 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     if (result.success) {
       await _loadProfiles();
     }
+
+    _showOperationSnackBar(result);
+  }
+
+  String _buildBackupPath(DatabaseProfile profile) {
+    final now = DateTime.now();
+    final timestamp =
+        '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+    final normalizedPath = profile.mdfPath.replaceAll('/', r'\');
+    final separatorIndex = normalizedPath.lastIndexOf(r'\');
+    final baseDir = separatorIndex >= 0
+        ? normalizedPath.substring(0, separatorIndex)
+        : normalizedPath;
+    return '$baseDir\\${profile.databaseName}_$timestamp.bak';
+  }
+
+  Future<OperationResult> _runBackupOnly(
+    DatabaseProfile profile, {
+    required String backupPath,
+  }) {
+    return _apiClient.backupDatabase(
+      profile,
+      backupPath: backupPath,
+      actorUsername: widget.session.username,
+      actorRole: _roleValue(widget.session.role),
+    );
+  }
+
+  Future<void> _backupDatabase(int index) async {
+    final profile = _profiles[index];
+    final backupPath = _buildBackupPath(profile);
+    final shouldBackup = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Confirm Backup'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Create a backup for ${profile.databaseName} before any change?',
+              ),
+              const SizedBox(height: 12),
+              _dialogInfoLine('Backup file', backupPath),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Backup'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted || shouldBackup != true) {
+      return;
+    }
+
+    setState(() {
+      _busyIndex = index;
+      _lastMessage = 'Creating backup for ${profile.databaseName}...';
+    });
+
+    final result = await _runBackupOnly(profile, backupPath: backupPath);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _busyIndex = null;
+      _lastMessage = result.message;
+    });
 
     _showOperationSnackBar(result);
   }
@@ -966,22 +1062,44 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
   Future<void> _detachDatabase(int index) async {
     final profile = _profiles[index];
-    final shouldDetach = await showDialog<bool>(
+    final backupPath = _buildBackupPath(profile);
+    final detachAction = await showDialog<_DetachAction>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Confirm Detach'),
-          content: Text(
-            'Detaching ${profile.databaseName} will disconnect active users and rollback uncommitted transactions. Do you want to continue?',
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Detaching ${profile.databaseName} will disconnect active users and rollback uncommitted transactions.',
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Recommended backup file:',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              Text(backupPath),
+            ],
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(_DetachAction.cancel),
               child: const Text('Cancel'),
             ),
+            OutlinedButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(_DetachAction.detachOnly),
+              child: const Text('Detach Only'),
+            ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Detach'),
+              onPressed: () => Navigator.of(
+                dialogContext,
+              ).pop(_DetachAction.backupAndDetach),
+              child: const Text('Backup & Detach'),
             ),
           ],
         );
@@ -992,7 +1110,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       return;
     }
 
-    if (shouldDetach != true) {
+    if (detachAction == null || detachAction == _DetachAction.cancel) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: Colors.blueGrey.shade700,
@@ -1000,6 +1118,33 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         ),
       );
       return;
+    }
+
+    if (detachAction == _DetachAction.backupAndDetach) {
+      setState(() {
+        _busyIndex = index;
+        _lastMessage = 'Creating backup for ${profile.databaseName}...';
+      });
+      final backupResult = await _runBackupOnly(
+        profile,
+        backupPath: backupPath,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (!backupResult.success) {
+        setState(() {
+          _busyIndex = null;
+          _lastMessage = backupResult.message;
+        });
+        _showOperationSnackBar(backupResult);
+        return;
+      }
+      setState(() {
+        _busyIndex = null;
+        _lastMessage = backupResult.message;
+      });
+      _showOperationSnackBar(backupResult);
     }
 
     await _runOperation(
@@ -1037,7 +1182,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     if (result.success) {
       try {
-        final profiles = await _apiClient.fetchProfiles();
+        final profiles = await _apiClient.fetchProfiles(
+          clientId: _activeClientId,
+        );
         if (!mounted) {
           return;
         }
@@ -1068,6 +1215,33 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         content: Text(result.message),
       ),
     );
+  }
+
+  Future<void> _switchAdminClient(int? clientId) async {
+    if (!_isAdmin || clientId == null || clientId == _selectedClientId) {
+      return;
+    }
+
+    final selectedClient = _clients.where((client) => client.id == clientId);
+    if (selectedClient.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _selectedClientId = clientId;
+      _clientSettings = selectedClient.first;
+      _editingClientId = null;
+      _editingUserId = null;
+      _selectedUserId = null;
+      _editingIndex = null;
+      _companyNameController.text = selectedClient.first.companyName;
+      _branchNameController.text = selectedClient.first.branchName;
+    });
+
+    _clearForm();
+    _clearUserForm();
+    await _loadProfiles();
+    await _loadAdminData();
   }
 
   @override
@@ -1109,6 +1283,33 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           ],
         ),
         actions: [
+          if (_isAdmin && _clients.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 220),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      value: _selectedClientId ?? _clientSettings?.id,
+                      borderRadius: BorderRadius.circular(16),
+                      onChanged: _switchAdminClient,
+                      items: _clients
+                          .map(
+                            (client) => DropdownMenuItem<int>(
+                              value: client.id,
+                              child: Text(
+                                '${client.companyName} / ${client.branchName}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: Center(child: _RoleBadge(userType: widget.session.role)),
@@ -2077,6 +2278,17 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                     )
                                   : const Icon(Icons.link),
                               label: const Text('Attach'),
+                            ),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: const BorderSide(color: Colors.white70),
+                              ),
+                              onPressed: isBusy || hasNameConflict
+                                  ? null
+                                  : () => _backupDatabase(index),
+                              icon: const Icon(Icons.save_alt_outlined),
+                              label: const Text('Backup'),
                             ),
                             OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(

@@ -75,6 +75,7 @@ async function initializeStorage() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS database_profiles (
       id INT NOT NULL AUTO_INCREMENT,
+      client_id INT NOT NULL DEFAULT 1,
       server VARCHAR(255) NOT NULL,
       database_name VARCHAR(255) NOT NULL,
       mdf_path TEXT NOT NULL,
@@ -87,6 +88,9 @@ async function initializeStorage() {
       PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+  await pool.query(
+    'ALTER TABLE database_profiles ADD COLUMN IF NOT EXISTS client_id INT NOT NULL DEFAULT 1 AFTER id',
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS app_security_settings (
@@ -126,16 +130,21 @@ async function initializeStorage() {
       password_hash TEXT NOT NULL,
       password_salt VARCHAR(255) NOT NULL,
       role VARCHAR(20) NOT NULL,
+      client_id INT NOT NULL DEFAULT 1,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
       UNIQUE KEY uniq_username (username)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+  await pool.query(
+    'ALTER TABLE app_users ADD COLUMN IF NOT EXISTS client_id INT NOT NULL DEFAULT 1 AFTER role',
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS activity_logs (
       id INT NOT NULL AUTO_INCREMENT,
+      client_id INT NOT NULL DEFAULT 1,
       actor_username VARCHAR(255) NOT NULL,
       actor_role VARCHAR(20) NOT NULL,
       action_name VARCHAR(255) NOT NULL,
@@ -144,6 +153,9 @@ async function initializeStorage() {
       PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+  await pool.query(
+    'ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS client_id INT NOT NULL DEFAULT 1 AFTER id',
+  );
 
   const [adminRows] = await pool.query(
     'SELECT id FROM app_users WHERE username = ? LIMIT 1',
@@ -153,9 +165,9 @@ async function initializeStorage() {
   if (adminRows.length === 0) {
     const { passwordHash, passwordSalt } = hashPassword(buildBootstrapPassword());
     await pool.query(
-      `INSERT INTO app_users (username, password_hash, password_salt, role)
-       VALUES (?, ?, ?, ?)`,
-      ['admin', passwordHash, passwordSalt, 'admin'],
+      `INSERT INTO app_users (username, password_hash, password_salt, role, client_id)
+       VALUES (?, ?, ?, ?, ?)`,
+      ['admin', passwordHash, passwordSalt, 'admin', 1],
     );
   }
 }
@@ -226,6 +238,11 @@ function normalizeUserType(value) {
   return VALID_USER_TYPES.has(value) ? value : 'admin';
 }
 
+function parseClientId(value, fallback = 1) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function buildBootstrapPassword() {
   const now = new Date();
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -247,15 +264,16 @@ function verifyPassword(password, passwordHash, passwordSalt) {
 }
 
 async function logActivity({
+  clientId = 1,
   actorUsername = 'system',
   actorRole = 'system',
   actionName,
   actionDetails,
 }) {
   await pool.query(
-    `INSERT INTO activity_logs (actor_username, actor_role, action_name, action_details)
-     VALUES (?, ?, ?, ?)`,
-    [actorUsername, actorRole, actionName, actionDetails],
+    `INSERT INTO activity_logs (client_id, actor_username, actor_role, action_name, action_details)
+     VALUES (?, ?, ?, ?, ?)`,
+    [clientId, actorUsername, actorRole, actionName, actionDetails],
   );
 }
 
@@ -302,6 +320,22 @@ BEGIN
 END
 ALTER DATABASE [${databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
 EXEC master.dbo.sp_detach_db @dbname = N'${databaseString}';
+  `;
+}
+
+function buildBackupQuery(payload) {
+  const databaseName = escapeSqlIdentifier(payload.databaseName);
+  const databaseString = escapeSqlString(payload.databaseName);
+  const backupPath = escapeSqlString(payload.backupPath);
+
+  return `
+IF DB_ID(N'${databaseString}') IS NULL
+BEGIN
+    THROW 50000, 'Database not found.', 1;
+END
+BACKUP DATABASE [${databaseName}]
+TO DISK = N'${backupPath}'
+WITH INIT, COPY_ONLY, COMPRESSION, CHECKSUM;
   `;
 }
 
@@ -452,15 +486,18 @@ async function resolveAttachmentStatus(profile) {
   return 'unknown';
 }
 
-async function listProfiles() {
+async function listProfiles(clientId) {
   const [rows] = await pool.query(
-    `SELECT id, server, database_name, mdf_path, ldf_path, authentication_mode, username, password
+    `SELECT id, client_id, server, database_name, mdf_path, ldf_path, authentication_mode, username, password
      FROM database_profiles
+     WHERE client_id = ?
      ORDER BY id DESC`,
+    [clientId],
   );
 
   const profiles = rows.map((row) => ({
     id: row.id,
+    clientId: row.client_id,
     server: row.server,
     databaseName: row.database_name,
     mdfPath: row.mdf_path,
@@ -520,6 +557,30 @@ async function getClientSettings() {
   };
 }
 
+async function getClientSettingsById(clientId) {
+  const [rows] = await pool.query(
+    `SELECT id, company_name, branch_name
+     FROM app_client_settings
+     WHERE id = ?
+     LIMIT 1`,
+    [clientId],
+  );
+
+  if (rows.length === 0) {
+    return {
+      id: clientId,
+      companyName: 'Database Utilities',
+      branchName: 'Main Branch',
+    };
+  }
+
+  return {
+    id: rows[0].id,
+    companyName: rows[0].company_name,
+    branchName: rows[0].branch_name,
+  };
+}
+
 async function listClientSettings() {
   const [rows] = await pool.query(
     `SELECT id, company_name, branch_name
@@ -570,17 +631,24 @@ async function saveClientSettings(payload) {
   return { id: nextId, companyName, branchName, action: 'created' };
 }
 
-async function listUsers() {
+async function listUsers(clientId) {
   const [rows] = await pool.query(
-    `SELECT id, username, role, created_at, updated_at
-     FROM app_users
+    `SELECT u.id, u.username, u.role, u.client_id, u.created_at, u.updated_at,
+            c.company_name, c.branch_name
+     FROM app_users u
+     LEFT JOIN app_client_settings c ON c.id = u.client_id
+     WHERE u.client_id = ?
      ORDER BY username ASC`,
+    [clientId],
   );
 
   return rows.map((row) => ({
     id: row.id,
     username: row.username,
     role: normalizeUserType(row.role),
+    clientId: row.client_id,
+    clientName: row.company_name || '',
+    branchName: row.branch_name || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
@@ -590,6 +658,7 @@ async function upsertUser(payload) {
   const username = String(payload.username || '').trim();
   const role = normalizeUserType(String(payload.role || '').trim());
   const password = String(payload.password || '');
+  const clientId = parseClientId(payload.clientId);
 
   if (!username) {
     throw new Error('Username is required.');
@@ -605,8 +674,8 @@ async function upsertUser(payload) {
     }
 
     await pool.query(
-      'UPDATE app_users SET username = ?, role = ? WHERE id = ?',
-      [username, role, payload.id],
+      'UPDATE app_users SET username = ?, role = ?, client_id = ? WHERE id = ?',
+      [username, role, clientId, payload.id],
     );
 
     if (password) {
@@ -626,17 +695,17 @@ async function upsertUser(payload) {
 
   const { passwordHash, passwordSalt } = hashPassword(password);
   await pool.query(
-    `INSERT INTO app_users (username, password_hash, password_salt, role)
-     VALUES (?, ?, ?, ?)`,
-    [username, passwordHash, passwordSalt, role],
+      `INSERT INTO app_users (username, password_hash, password_salt, role, client_id)
+       VALUES (?, ?, ?, ?, ?)`,
+    [username, passwordHash, passwordSalt, role, clientId],
   );
   return 'User created successfully.';
 }
 
-async function deleteUser(id) {
+async function deleteUser(id, clientId) {
   const [existingRows] = await pool.query(
-    'SELECT username FROM app_users WHERE id = ? LIMIT 1',
-    [id],
+    'SELECT username FROM app_users WHERE id = ? AND client_id = ? LIMIT 1',
+    [id, clientId],
   );
   if (existingRows.length === 0) {
     return false;
@@ -645,7 +714,10 @@ async function deleteUser(id) {
     throw new Error('The default admin account cannot be deleted.');
   }
 
-  const [result] = await pool.query('DELETE FROM app_users WHERE id = ?', [id]);
+  const [result] = await pool.query(
+    'DELETE FROM app_users WHERE id = ? AND client_id = ?',
+    [id, clientId],
+  );
   return result.affectedRows > 0;
 }
 
@@ -678,7 +750,7 @@ async function authenticateUser(payload) {
   }
 
   const [rows] = await pool.query(
-    `SELECT id, username, password_hash, password_salt, role
+    `SELECT id, username, password_hash, password_salt, role, client_id
      FROM app_users
      WHERE username = ?
      LIMIT 1`,
@@ -698,17 +770,19 @@ async function authenticateUser(payload) {
     id: user.id,
     username: user.username,
     role: normalizeUserType(user.role),
+    clientId: user.client_id,
   };
 }
 
-async function listActivityLogs(limit = 100) {
+async function listActivityLogs(clientId, limit = 100) {
   const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
   const [rows] = await pool.query(
-    `SELECT id, actor_username, actor_role, action_name, action_details, created_at
+    `SELECT id, client_id, actor_username, actor_role, action_name, action_details, created_at
      FROM activity_logs
+     WHERE client_id = ?
      ORDER BY id DESC
      LIMIT ?`,
-    [safeLimit],
+    [clientId, safeLimit],
   );
 
   return rows.map((row) => ({
@@ -723,6 +797,7 @@ async function listActivityLogs(limit = 100) {
 
 async function createActivityLog(payload) {
   await logActivity({
+    clientId: parseClientId(payload.clientId),
     actorUsername: String(payload.actorUsername || 'system'),
     actorRole: String(payload.actorRole || 'system'),
     actionName: String(payload.actionName || 'custom_event'),
@@ -731,7 +806,9 @@ async function createActivityLog(payload) {
 }
 
 async function saveProfile(payload) {
+  const clientId = parseClientId(payload.clientId);
   const values = [
+    clientId,
     payload.server,
     payload.databaseName,
     payload.mdfPath,
@@ -744,21 +821,23 @@ async function saveProfile(payload) {
   if (payload.id) {
     await pool.query(
       `UPDATE database_profiles
-       SET server = ?,
-           database_name = ?,
+       SET client_id = ?,
+            server = ?,
+            database_name = ?,
            mdf_path = ?,
            ldf_path = ?,
            authentication_mode = ?,
            username = ?,
            password = ?
-       WHERE id = ?`,
-      [...values, payload.id],
+       WHERE id = ? AND client_id = ?`,
+      [...values, payload.id, clientId],
     );
     return 'Settings updated successfully.';
   }
 
   await pool.query(
     `INSERT INTO database_profiles (
+      client_id,
       server,
       database_name,
       mdf_path,
@@ -766,14 +845,17 @@ async function saveProfile(payload) {
       authentication_mode,
       username,
       password
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     values,
   );
   return 'Settings saved successfully.';
 }
 
-async function deleteProfile(id) {
-  const [result] = await pool.query('DELETE FROM database_profiles WHERE id = ?', [id]);
+async function deleteProfile(id, clientId) {
+  const [result] = await pool.query(
+    'DELETE FROM database_profiles WHERE id = ? AND client_id = ?',
+    [id, clientId],
+  );
   return result.affectedRows > 0;
 }
 
@@ -785,7 +867,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/health') {
     try {
-      const profiles = await listProfiles();
+      const profiles = await listProfiles(1);
       const primaryProfile = profiles[0] || null;
       const sqlDatabaseName = primaryProfile ? primaryProfile.databaseName : 'not configured';
 
@@ -805,9 +887,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && req.url === '/api/settings/profiles') {
+  if (req.method === 'GET' && req.url.startsWith('/api/settings/profiles')) {
     try {
-      const profiles = await listProfiles();
+      const requestUrl = new URL(req.url, 'http://localhost');
+      const profiles = await listProfiles(
+        parseClientId(requestUrl.searchParams.get('clientId')),
+      );
       sendJson(res, 200, {
         success: true,
         profiles,
@@ -858,8 +943,9 @@ const server = http.createServer(async (req, res) => {
     try {
       const payload = await readJsonBody(req);
       const user = await authenticateUser(payload);
-      const clientSettings = await getClientSettings();
+      const clientSettings = await getClientSettingsById(user.clientId);
       await logActivity({
+        clientId: user.clientId,
         actorUsername: user.username,
         actorRole: user.role,
         actionName: 'login',
@@ -874,6 +960,25 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 401, {
         success: false,
         message: error.message || 'Authentication failed.',
+      });
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/api/client/settings?')) {
+    try {
+      const requestUrl = new URL(req.url, 'http://localhost');
+      const settings = await getClientSettingsById(
+        parseClientId(requestUrl.searchParams.get('clientId')),
+      );
+      sendJson(res, 200, {
+        success: true,
+        ...settings,
+      });
+    } catch (error) {
+      sendJson(res, 500, {
+        success: false,
+        message: error.message || 'Could not load client settings.',
       });
     }
     return;
@@ -916,6 +1021,7 @@ const server = http.createServer(async (req, res) => {
       const payload = await readJsonBody(req);
       const savedClient = await saveClientSettings(payload);
       await logActivity({
+        clientId: savedClient.id,
         actorUsername: String(payload.actorUsername || 'admin'),
         actorRole: String(payload.actorRole || 'admin'),
         actionName: 'save_client_settings',
@@ -938,9 +1044,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && req.url === '/api/security/users') {
+  if (req.method === 'GET' && req.url.startsWith('/api/security/users')) {
     try {
-      const users = await listUsers();
+      const requestUrl = new URL(req.url, 'http://localhost');
+      const users = await listUsers(
+        parseClientId(requestUrl.searchParams.get('clientId')),
+      );
       sendJson(res, 200, {
         success: true,
         users,
@@ -959,6 +1068,7 @@ const server = http.createServer(async (req, res) => {
       const payload = await readJsonBody(req);
       const message = await upsertUser(payload);
       await logActivity({
+        clientId: parseClientId(payload.clientId),
         actorUsername: String(payload.actorUsername || 'admin'),
         actorRole: String(payload.actorRole || 'admin'),
         actionName: payload.id ? 'update_user' : 'create_user',
@@ -982,6 +1092,7 @@ const server = http.createServer(async (req, res) => {
       const payload = await readJsonBody(req);
       await updateUserPassword(payload);
       await logActivity({
+        clientId: parseClientId(payload.clientId),
         actorUsername: String(payload.actorUsername || 'admin'),
         actorRole: String(payload.actorRole || 'admin'),
         actionName: 'change_user_password',
@@ -1004,6 +1115,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const requestUrl = new URL(req.url, 'http://localhost');
       const id = parseInt(requestUrl.pathname.split('/').pop(), 10);
+      const clientId = parseClientId(requestUrl.searchParams.get('clientId'));
       if (!Number.isFinite(id)) {
         sendJson(res, 400, {
           success: false,
@@ -1012,9 +1124,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const removed = await deleteUser(id);
+      const removed = await deleteUser(id, clientId);
       if (removed) {
         await logActivity({
+          clientId,
           actorUsername: String(requestUrl.searchParams.get('actorUsername') || 'admin'),
           actorRole: String(requestUrl.searchParams.get('actorRole') || 'admin'),
           actionName: 'delete_user',
@@ -1037,7 +1150,10 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/api/activity-logs')) {
     try {
       const requestUrl = new URL(req.url, 'http://localhost');
-      const logs = await listActivityLogs(requestUrl.searchParams.get('limit'));
+      const logs = await listActivityLogs(
+        parseClientId(requestUrl.searchParams.get('clientId')),
+        requestUrl.searchParams.get('limit'),
+      );
       sendJson(res, 200, {
         success: true,
         logs,
@@ -1083,6 +1199,7 @@ const server = http.createServer(async (req, res) => {
 
       const message = await saveProfile(payload);
       await logActivity({
+        clientId: parseClientId(payload.clientId),
         actorUsername: String(payload.actorUsername || 'admin'),
         actorRole: String(payload.actorRole || 'admin'),
         actionName: payload.id ? 'update_profile' : 'create_profile',
@@ -1105,6 +1222,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const requestUrl = new URL(req.url, 'http://localhost');
       const id = parseInt(requestUrl.pathname.split('/').pop(), 10);
+      const clientId = parseClientId(requestUrl.searchParams.get('clientId'));
       if (!Number.isFinite(id)) {
         sendJson(res, 400, {
           success: false,
@@ -1113,9 +1231,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const removed = await deleteProfile(id);
+      const removed = await deleteProfile(id, clientId);
       if (removed) {
         await logActivity({
+          clientId,
           actorUsername: String(requestUrl.searchParams.get('actorUsername') || 'admin'),
           actorRole: String(requestUrl.searchParams.get('actorRole') || 'admin'),
           actionName: 'delete_profile',
@@ -1150,6 +1269,7 @@ const server = http.createServer(async (req, res) => {
 
       const result = await runSqlcmd(payload, buildAttachQuery(payload));
       await logActivity({
+        clientId: parseClientId(payload.clientId),
         actorUsername: String(payload.actorUsername || 'system'),
         actorRole: String(payload.actorRole || 'system'),
         actionName: 'attach_database',
@@ -1160,6 +1280,45 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 400, {
         success: false,
         message: error.message || 'Unable to process request.',
+      });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/databases/backup') {
+    try {
+      const payload = await readJsonBody(req);
+      const missing = validateProfile(payload);
+
+      if (missing.length > 0) {
+        sendJson(res, 400, {
+          success: false,
+          message: `Missing required fields: ${missing.join(', ')}`,
+        });
+        return;
+      }
+
+      if (!String(payload.backupPath || '').trim()) {
+        sendJson(res, 400, {
+          success: false,
+          message: 'Backup path is required.',
+        });
+        return;
+      }
+
+      const result = await runSqlcmd(payload, buildBackupQuery(payload));
+      await logActivity({
+        clientId: parseClientId(payload.clientId),
+        actorUsername: String(payload.actorUsername || 'system'),
+        actorRole: String(payload.actorRole || 'system'),
+        actionName: 'backup_database',
+        actionDetails: `${payload.databaseName}: ${result.message}`,
+      });
+      sendJson(res, result.success ? 200 : 500, result);
+    } catch (error) {
+      sendJson(res, 400, {
+        success: false,
+        message: error.message || 'Unable to process backup request.',
       });
     }
     return;
@@ -1180,6 +1339,7 @@ const server = http.createServer(async (req, res) => {
 
       const result = await runSqlcmd(payload, buildDetachQuery(payload));
       await logActivity({
+        clientId: parseClientId(payload.clientId),
         actorUsername: String(payload.actorUsername || 'system'),
         actorRole: String(payload.actorRole || 'system'),
         actionName: 'detach_database',

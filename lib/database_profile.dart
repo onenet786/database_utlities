@@ -5,6 +5,7 @@ enum DatabaseAttachmentStatus { attached, detached, nameConflict, unknown }
 class DatabaseProfile {
   DatabaseProfile({
     this.id,
+    this.clientId,
     required this.server,
     required this.databaseName,
     required this.mdfPath,
@@ -16,6 +17,7 @@ class DatabaseProfile {
   });
 
   final int? id;
+  final int? clientId;
   final String server;
   final String databaseName;
   final String mdfPath;
@@ -37,6 +39,9 @@ class DatabaseProfile {
       id: json['id'] is int
           ? json['id'] as int
           : int.tryParse('${json['id'] ?? ''}'),
+      clientId: json['clientId'] is int
+          ? json['clientId'] as int
+          : int.tryParse('${json['clientId'] ?? json['client_id'] ?? ''}'),
       server: (json['server'] ?? '').toString(),
       databaseName: (json['databaseName'] ?? json['database_name'] ?? '')
           .toString(),
@@ -59,6 +64,7 @@ class DatabaseProfile {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'clientId': clientId,
       'server': server,
       'databaseName': databaseName,
       'mdfPath': mdfPath,
@@ -79,6 +85,7 @@ class DatabaseProfile {
 
   DatabaseProfile copyWith({
     int? id,
+    int? clientId,
     String? server,
     String? databaseName,
     String? mdfPath,
@@ -90,6 +97,7 @@ class DatabaseProfile {
   }) {
     return DatabaseProfile(
       id: id ?? this.id,
+      clientId: clientId ?? this.clientId,
       server: server ?? this.server,
       databaseName: databaseName ?? this.databaseName,
       mdfPath: mdfPath ?? this.mdfPath,
