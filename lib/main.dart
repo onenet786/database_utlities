@@ -255,7 +255,7 @@ class LaunchGatePage extends StatefulWidget {
 }
 
 class _LaunchGatePageState extends State<LaunchGatePage> {
-  final _usernameController = TextEditingController(text: 'admin');
+  final _usernameController = TextEditingController(text: 'user');
   final _passwordController = TextEditingController();
   final ApiClient _apiClient = ApiClient(
     baseUrl: dotenv.env['API_BASE_URL'] ?? '',
@@ -506,7 +506,6 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   int? _editingIndex;
   int? _busyIndex;
   String? _lastMessage;
-  String? _apiStatusMessage;
   bool _isSqlPasswordVisible = false;
   bool _isAppUserPasswordVisible = false;
   ClientSettings? _clientSettings;
@@ -519,9 +518,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   final _appUserPasswordController = TextEditingController();
   UserType _appUserRole = UserType.user;
   int? _editingUserId;
+  int? _selectedUserId;
+  AdminSection _selectedAdminSection = AdminSection.dashboard;
 
-  String get _apiBaseUrl => dotenv.env['API_BASE_URL'] ?? '';
-  ApiClient get _apiClient => ApiClient(baseUrl: _apiBaseUrl);
+  ApiClient get _apiClient =>
+      ApiClient(baseUrl: dotenv.env['API_BASE_URL'] ?? '');
   bool get _isAdmin => widget.session.role == UserType.admin;
 
   @override
@@ -574,6 +575,10 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         _branchNameController.text = clientSettings.branchName;
         _users = users;
         _activityLogs = activityLogs;
+        if (_selectedUserId != null &&
+            !_users.any((user) => user.id == _selectedUserId)) {
+          _selectedUserId = null;
+        }
         _isLoadingAdminData = false;
       });
     } catch (error) {
@@ -623,6 +628,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
   void _loadUserForEditing(AppUser user) {
     _editingUserId = user.id;
+    _selectedUserId = user.id;
     _appUsernameController.text = user.username;
     _appUserPasswordController.clear();
     _appUserRole = user.role;
@@ -632,6 +638,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
   void _clearUserForm() {
     _editingUserId = null;
+    _selectedUserId = null;
     _appUsernameController.clear();
     _appUserPasswordController.clear();
     _appUserRole = UserType.user;
@@ -697,7 +704,6 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     });
 
     try {
-      final apiStatusMessage = await _apiClient.fetchHealthMessage();
       final profiles = await _apiClient.fetchProfiles();
       if (!mounted) {
         return;
@@ -706,7 +712,6 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       setState(() {
         _profiles = profiles;
         _isLoadingProfiles = false;
-        _apiStatusMessage = apiStatusMessage;
         _lastMessage = profiles.isEmpty
             ? 'No saved settings found in MySQL yet.'
             : 'Loaded ${profiles.length} saved setting(s) from MySQL.';
@@ -718,7 +723,6 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
       setState(() {
         _isLoadingProfiles = false;
-        _apiStatusMessage = null;
         _lastMessage = 'Could not load saved settings. Details: $error';
       });
     }
@@ -884,6 +888,10 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       },
     );
 
+    if (!mounted) {
+      return;
+    }
+
     if (shouldAttach != true) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -928,6 +936,10 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         );
       },
     );
+
+    if (!mounted) {
+      return;
+    }
 
     if (shouldDetach != true) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1014,6 +1026,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         : _buildUserWorkspace(context);
 
     return Scaffold(
+      drawer: _isAdmin ? _buildAdminDrawer(context) : null,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
@@ -1082,59 +1095,13 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       color: const Color(0xFF0A2540),
     );
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 1150;
-        final header = _buildWorkspaceIntro(
-          title: 'Admin Command Center',
-          description:
-              'Manage stored SQL Server profiles, enforce role-aware access, and run attach-detach operations from one secured workspace.',
-        );
-        final formPanel = _buildFormPanel(headline);
-        final listPanel = _buildProfilesPanel(headline);
-        final clientPanel = _buildClientPanel(headline);
-        final userPanel = _buildUserPanel(headline);
-        final activityPanel = _buildActivityPanel(headline);
-
-        return ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            header,
-            const SizedBox(height: 20),
-            if (isWide)
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 5, child: formPanel),
-                  const SizedBox(width: 20),
-                  Expanded(flex: 6, child: listPanel),
-                ],
-              )
-            else ...[
-              formPanel,
-              const SizedBox(height: 20),
-              listPanel,
-            ],
-            const SizedBox(height: 20),
-            if (isWide)
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: clientPanel),
-                  const SizedBox(width: 20),
-                  Expanded(child: userPanel),
-                ],
-              )
-            else ...[
-              clientPanel,
-              const SizedBox(height: 20),
-              userPanel,
-            ],
-            const SizedBox(height: 20),
-            activityPanel,
-          ],
-        );
-      },
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        _buildWorkspaceIntro(title: _selectedAdminSection.title),
+        const SizedBox(height: 20),
+        _buildAdminSectionContent(headline),
+      ],
     );
   }
 
@@ -1146,22 +1113,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     return ListView(
       padding: const EdgeInsets.all(20),
-      children: [
-        _buildWorkspaceIntro(
-          title: 'User Operations',
-          description:
-              'This protected view is intentionally limited. You can attach or detach saved databases, but configuration management stays reserved for administrators.',
-        ),
-        const SizedBox(height: 20),
-        _buildProfilesPanel(headline),
-      ],
+      children: [_buildProfilesPanel(headline)],
     );
   }
 
-  Widget _buildWorkspaceIntro({
-    required String title,
-    required String description,
-  }) {
+  Widget _buildWorkspaceIntro({required String title}) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -1189,29 +1145,264 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  description,
-                  style: const TextStyle(
-                    color: Color(0xFFE6F3F6),
-                    fontSize: 15,
-                    height: 1.45,
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdminDrawer(BuildContext context) {
+    final sections = AdminSection.values;
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color(0xFF0E3B4D),
+                      Color(0xFF0E7490),
+                      Color(0xFFE7A06A),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
+                  borderRadius: BorderRadius.circular(24),
                 ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _infoPill(_isAdmin ? 'Role: Admin' : 'Role: User'),
-                    _infoPill('API secured'),
-                    _infoPill('Session locks on minimize'),
+                    const Row(
+                      children: [
+                        AppBrandMark(size: 42, compact: true),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Admin Workspace',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      _clientSettings?.companyName ?? 'Database Utilities',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _clientSettings?.branchName ?? 'Main Branch',
+                      style: const TextStyle(color: Color(0xFFE6F3F6)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: [
+                  for (final section in sections)
+                    _buildAdminDrawerTile(
+                      context: context,
+                      section: section,
+                      selected: _selectedAdminSection == section,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAdminDrawerTile({
+    required BuildContext context,
+    required AdminSection section,
+    required bool selected,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: ListTile(
+        leading: Icon(section.icon),
+        title: Text(section.label),
+        selected: selected,
+        selectedTileColor: const Color(0xFFE7F4F7),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        onTap: () {
+          setState(() {
+            _selectedAdminSection = section;
+          });
+          Navigator.of(context).pop();
+        },
+      ),
+    );
+  }
+
+  Widget _buildAdminSectionContent(TextStyle? headline) {
+    return switch (_selectedAdminSection) {
+      AdminSection.dashboard => _buildAdminDashboardPanel(headline),
+      AdminSection.databaseProfiles => _buildAdminDatabaseWorkspace(headline),
+      AdminSection.clientSettings => _buildClientPanel(headline),
+      AdminSection.userManagement => _buildUserPanel(headline),
+      AdminSection.activityLogs => _buildActivityPanel(headline),
+    };
+  }
+
+  Widget _buildAdminDashboardPanel(TextStyle? headline) {
+    final attachedCount = _profiles
+        .where(
+          (profile) =>
+              profile.attachmentStatus == DatabaseAttachmentStatus.attached,
+        )
+        .length;
+    final detachedCount = _profiles
+        .where(
+          (profile) =>
+              profile.attachmentStatus == DatabaseAttachmentStatus.detached,
+        )
+        .length;
+    final adminCount = _users
+        .where((user) => user.role == UserType.admin)
+        .length;
+    final userCount = _users.where((user) => user.role == UserType.user).length;
+
+    return Column(
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Operations Overview', style: headline),
+                const SizedBox(height: 20),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
+                  children: [
+                    _buildDashboardStatCard(
+                      title: 'Saved Databases',
+                      value: '${_profiles.length}',
+                      subtitle:
+                          '$attachedCount attached, $detachedCount detached',
+                      icon: Icons.storage_rounded,
+                    ),
+                    _buildDashboardStatCard(
+                      title: 'Users',
+                      value: '${_users.length}',
+                      subtitle: '$adminCount admins, $userCount operators',
+                      icon: Icons.groups_2_outlined,
+                    ),
+                    _buildDashboardStatCard(
+                      title: 'Activity Logs',
+                      value: '${_activityLogs.length}',
+                      subtitle:
+                          'Latest ${_activityLogs.length.clamp(0, 120)} loaded',
+                      icon: Icons.history_rounded,
+                    ),
                   ],
                 ),
               ],
             ),
           ),
-        ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAdminDatabaseWorkspace(TextStyle? headline) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 1100;
+        final formPanel = _buildFormPanel(headline);
+        final listPanel = _buildProfilesPanel(headline);
+
+        if (isWide) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 5, child: formPanel),
+              const SizedBox(width: 20),
+              Expanded(flex: 6, child: listPanel),
+            ],
+          );
+        }
+
+        return Column(
+          children: [formPanel, const SizedBox(height: 20), listPanel],
+        );
+      },
+    );
+  }
+
+  Widget _buildDashboardStatCard({
+    required String title,
+    required String value,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 220, maxWidth: 280),
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: const Color(0xFFD8E2EC)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE7F4F7),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(icon, color: const Color(0xFF0E7490)),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              value,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: const Color(0xFF0A2540),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF113247),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4F6478)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1226,52 +1417,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Server Settings', style: headline),
-              const SizedBox(height: 8),
-              Text(
-                'Administrators can create or update the saved SQL Server profiles stored in MySQL.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF4F6478),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0xFFD8E2EC)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Secure API Status',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: const Color(0xFF355468),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _apiBaseUrl.trim().isEmpty
-                          ? 'API connection is not configured.'
-                          : 'API connection is configured.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    if (_apiStatusMessage != null) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        _apiStatusMessage!,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF4F6478),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               _buildField(
                 controller: _serverController,
                 label: 'SQL Server instance',
@@ -1381,13 +1527,6 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Client Settings', style: headline),
-            const SizedBox(height: 8),
-            Text(
-              'Customize the company and branch labels used by this deployment.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4F6478)),
-            ),
             const SizedBox(height: 20),
             _buildField(
               controller: _companyNameController,
@@ -1425,13 +1564,6 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Users & Roles', style: headline),
-            const SizedBox(height: 8),
-            Text(
-              'Create users, edit roles, and change passwords for different client branches.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4F6478)),
-            ),
             const SizedBox(height: 20),
             _buildField(
               controller: _appUsernameController,
@@ -1497,50 +1629,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
             if (_isLoadingAdminData)
               const Center(child: CircularProgressIndicator())
             else
-              ..._users.map(
-                (user) => Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFFD8E2EC)),
-                  ),
-                  child: Wrap(
-                    alignment: WrapAlignment.spaceBetween,
-                    runSpacing: 12,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            user.username,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          Text(_roleValue(user.role)),
-                        ],
-                      ),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          OutlinedButton(
-                            onPressed: () => _loadUserForEditing(user),
-                            child: const Text('Edit'),
-                          ),
-                          OutlinedButton(
-                            onPressed: user.id == null
-                                ? null
-                                : () => _deleteAppUser(user),
-                            child: const Text('Delete'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              _buildUsersTable(),
           ],
         ),
       ),
@@ -1555,51 +1644,134 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Activity Logs', style: headline),
-            const SizedBox(height: 8),
-            Text(
-              'Every significant user action is recorded for audit and support purposes.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4F6478)),
-            ),
             const SizedBox(height: 20),
             if (_isLoadingAdminData)
               const Center(child: CircularProgressIndicator())
             else if (_activityLogs.isEmpty)
               const Text('No activity logs recorded yet.')
             else
-              ..._activityLogs
-                  .take(40)
-                  .map(
-                    (log) => Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: const Color(0xFFD8E2EC)),
+              _buildActivityLogsTable(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUsersTable() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          border: Border.all(color: const Color(0xFFD8E2EC)),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 640),
+            child: DataTable(
+              headingRowColor: WidgetStateProperty.all(const Color(0xFFE7F4F7)),
+              columns: const [
+                DataColumn(label: Text('Username')),
+                DataColumn(label: Text('Role')),
+                DataColumn(label: Text('Edit')),
+                DataColumn(label: Text('Delete')),
+              ],
+              rows: _users.map((user) {
+                final isSelected =
+                    _selectedUserId != null &&
+                    _selectedUserId == (user.id ?? -1);
+                return DataRow(
+                  selected: isSelected,
+                  onSelectChanged: (_) {
+                    setState(() {
+                      _selectedUserId = user.id;
+                    });
+                  },
+                  cells: [
+                    DataCell(
+                      Text(user.username),
+                      onDoubleTap: () => _loadUserForEditing(user),
+                    ),
+                    DataCell(
+                      Text(_roleValue(user.role)),
+                      onDoubleTap: () => _loadUserForEditing(user),
+                    ),
+                    DataCell(
+                      IconButton(
+                        tooltip: 'Edit user',
+                        onPressed: () => _loadUserForEditing(user),
+                        icon: const Icon(Icons.edit_outlined),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${log.actorUsername} • ${log.actionName}',
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(log.actionDetails),
-                          const SizedBox(height: 4),
-                          Text(
-                            log.createdAt,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: const Color(0xFF4F6478)),
-                          ),
-                        ],
+                      onDoubleTap: () => _loadUserForEditing(user),
+                    ),
+                    DataCell(
+                      IconButton(
+                        tooltip: 'Delete user',
+                        onPressed: user.id == null
+                            ? null
+                            : () => _deleteAppUser(user),
+                        icon: const Icon(Icons.delete_outline),
                       ),
                     ),
-                  ),
-          ],
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActivityLogsTable() {
+    final logs = _activityLogs.take(40).toList();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          border: Border.all(color: const Color(0xFFD8E2EC)),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 980),
+            child: DataTable(
+              headingRowColor: WidgetStateProperty.all(const Color(0xFFE7F4F7)),
+              columns: const [
+                DataColumn(label: Text('User')),
+                DataColumn(label: Text('Role')),
+                DataColumn(label: Text('Action')),
+                DataColumn(label: Text('Details')),
+                DataColumn(label: Text('Created')),
+              ],
+              rows: logs.map((log) {
+                return DataRow(
+                  cells: [
+                    DataCell(Text(log.actorUsername)),
+                    DataCell(Text(log.actorRole)),
+                    DataCell(Text(log.actionName)),
+                    DataCell(
+                      SizedBox(
+                        width: 360,
+                        child: Text(
+                          log.actionDetails,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                    DataCell(Text(log.createdAt)),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
         ),
       ),
     );
@@ -1613,19 +1785,13 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              _isAdmin ? 'Saved Settings' : 'Attach / Detach',
+              _isAdmin ? 'Saved Settings' : 'Saved Databases',
               style: headline,
             ),
-            const SizedBox(height: 8),
-            Text(
-              _isAdmin
-                  ? 'These profiles are stored in MySQL and can be used for secure attach and detach operations.'
-                  : 'This user view only exposes database operation controls for the saved profiles.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4F6478)),
-            ),
-            const SizedBox(height: 20),
+            if (_isAdmin) ...[
+              const SizedBox(height: 20),
+            ] else
+              const SizedBox(height: 12),
             if (_lastMessage != null) ...[
               Container(
                 width: double.infinity,
@@ -1761,15 +1927,6 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                                     AuthenticationMode.windows
                                 ? 'Windows Authentication'
                                 : 'SQL Server Login (${profile.username})',
-                          ),
-                        ] else ...[
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Restricted operations view. Configuration details remain hidden in user mode.',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              height: 1.4,
-                            ),
                           ),
                         ],
                         const SizedBox(height: 18),
@@ -1913,24 +2070,6 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     );
   }
 
-  Widget _infoPill(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white24),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-
   String? _requiredValidator(String? value) {
     if (value == null || value.trim().isEmpty) {
       return 'This field is required.';
@@ -2027,6 +2166,44 @@ class AppBrandMark extends StatelessWidget {
   }
 }
 
+enum AdminSection {
+  dashboard(
+    label: 'Dashboard',
+    title: 'Admin Dashboard',
+    icon: Icons.dashboard_outlined,
+  ),
+  databaseProfiles(
+    label: 'Database Utilities',
+    title: 'Database Utilities',
+    icon: Icons.storage_rounded,
+  ),
+  clientSettings(
+    label: 'Client Settings',
+    title: 'Client Settings',
+    icon: Icons.apartment_outlined,
+  ),
+  userManagement(
+    label: 'Users & Roles',
+    title: 'Users and Roles',
+    icon: Icons.manage_accounts_outlined,
+  ),
+  activityLogs(
+    label: 'Activity Logs',
+    title: 'Activity Logs',
+    icon: Icons.history_rounded,
+  );
+
+  const AdminSection({
+    required this.label,
+    required this.title,
+    required this.icon,
+  });
+
+  final String label;
+  final String title;
+  final IconData icon;
+}
+
 class _RoleBadge extends StatelessWidget {
   const _RoleBadge({required this.userType});
 
@@ -2059,68 +2236,6 @@ class _RoleBadge extends StatelessWidget {
                   ? const Color(0xFF0E7490)
                   : const Color(0xFFB45309),
               fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SecuritySpotlightCard extends StatelessWidget {
-  const _SecuritySpotlightCard({
-    required this.title,
-    required this.description,
-    required this.accent,
-  });
-
-  final String title;
-  final String description;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: accent.withValues(alpha: 0.25)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(Icons.verified_user_outlined, color: accent),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: const Color(0xFF113247),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  description,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF4F6478),
-                    height: 1.4,
-                  ),
-                ),
-              ],
             ),
           ),
         ],

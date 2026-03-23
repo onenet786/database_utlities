@@ -39,17 +39,6 @@ class ApiClient {
     });
   }
 
-  Future<String> fetchHealthMessage() async {
-    final uri = _buildUri('/health');
-    if (uri == null) {
-      throw Exception('API connection is not configured.');
-    }
-
-    final response = await http.get(uri);
-    final body = _decodeBody(response.body);
-    return (body['message'] as String?) ?? 'API is reachable.';
-  }
-
   Future<SecurityPreference> fetchSecurityPreference() async {
     final uri = _buildUri('/api/security/preferences');
     if (uri == null) {
@@ -308,10 +297,6 @@ class ApiClient {
         command: '',
       );
     }
-  }
-
-  Future<OperationResult> _post(String path, DatabaseProfile profile) async {
-    return _postJson(path, profile.toJson());
   }
 
   Future<OperationResult> _postJson(
