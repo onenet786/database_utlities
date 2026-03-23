@@ -511,6 +511,8 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   String? _lastMessage;
   bool _isSqlPasswordVisible = false;
   bool _isAppUserPasswordVisible = false;
+  bool _isDiscoveringInstances = false;
+  bool _isDiscoveringDatabases = false;
   ClientSettings? _clientSettings;
   List<ClientSettings> _clients = [];
   List<AppUser> _users = [];
@@ -999,6 +1001,147 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     _showOperationSnackBar(result);
   }
 
+  Future<void> _browseSqlInstances() async {
+    if (_isDiscoveringInstances) {
+      return;
+    }
+
+    setState(() {
+      _isDiscoveringInstances = true;
+    });
+
+    try {
+      final instances = await _apiClient.discoverSqlInstances();
+      if (!mounted) {
+        return;
+      }
+
+      final selection = await _showStringSelectionDialog(
+        title: 'SQL Server Instances',
+        items: instances,
+        emptyMessage: 'No SQL Server instances were discovered.',
+      );
+      if (!mounted || selection == null) {
+        return;
+      }
+
+      setState(() {
+        _serverController.text = selection;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showOperationSnackBar(
+        OperationResult(success: false, message: '$error', command: ''),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDiscoveringInstances = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _browseDatabases() async {
+    if (_isDiscoveringDatabases) {
+      return;
+    }
+
+    final server = _serverController.text.trim();
+    if (server.isEmpty) {
+      _showOperationSnackBar(
+        const OperationResult(
+          success: false,
+          message: 'Enter or browse a SQL Server instance first.',
+          command: '',
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isDiscoveringDatabases = true;
+    });
+
+    try {
+      final databases = await _apiClient.discoverDatabases(
+        server: server,
+        authenticationMode: _authenticationMode,
+        username: _usernameController.text.trim(),
+        password: _passwordController.text,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      final selection = await _showStringSelectionDialog(
+        title: 'Databases',
+        items: databases,
+        emptyMessage: 'No databases were returned by SQL Server.',
+      );
+      if (!mounted || selection == null) {
+        return;
+      }
+
+      setState(() {
+        _databaseNameController.text = selection;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showOperationSnackBar(
+        OperationResult(success: false, message: '$error', command: ''),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDiscoveringDatabases = false;
+        });
+      }
+    }
+  }
+
+  Future<String?> _showStringSelectionDialog({
+    required String title,
+    required List<String> items,
+    required String emptyMessage,
+  }) {
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(title),
+          content: SizedBox(
+            width: 420,
+            child: items.isEmpty
+                ? Text(emptyMessage)
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: items.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final item = items[index];
+                      return ListTile(
+                        title: Text(item),
+                        onTap: () => Navigator.of(dialogContext).pop(item),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _attachDatabase(int index) async {
     final profile = _profiles[index];
     final shouldAttach = await showDialog<bool>(
@@ -1249,6 +1392,12 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     final content = _isAdmin
         ? _buildAdminWorkspace(context)
         : _buildUserWorkspace(context);
+    final clientDropdownValue =
+        _clients.any(
+          (client) => client.id == (_selectedClientId ?? _clientSettings?.id),
+        )
+        ? (_selectedClientId ?? _clientSettings?.id)
+        : null;
 
     return Scaffold(
       drawer: _isAdmin ? _buildAdminDrawer(context) : null,
@@ -1285,21 +1434,36 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         actions: [
           if (_isAdmin && _clients.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.only(right: 4),
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 220),
+                  constraints: const BoxConstraints(maxWidth: 170),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<int>(
-                      value: _selectedClientId ?? _clientSettings?.id,
+                      value: clientDropdownValue,
                       borderRadius: BorderRadius.circular(16),
+                      isDense: true,
+                      isExpanded: true,
                       onChanged: _switchAdminClient,
+                      selectedItemBuilder: (context) => _clients
+                          .map(
+                            (client) => Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '${client.companyName} / ${client.branchName}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
                       items: _clients
                           .map(
                             (client) => DropdownMenuItem<int>(
                               value: client.id,
                               child: Text(
                                 '${client.companyName} / ${client.branchName}',
+                                maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
@@ -1311,17 +1475,19 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
               ),
             ),
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.only(right: 4),
             child: Center(child: _RoleBadge(userType: widget.session.role)),
           ),
           IconButton(
             tooltip: 'Reload settings',
             onPressed: _isLoadingProfiles ? null : _loadProfiles,
+            visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
             tooltip: 'Lock workspace',
             onPressed: widget.onLockRequested,
+            visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.lock_outline),
           ),
         ],
@@ -1675,6 +1841,19 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                 label: 'SQL Server instance',
                 hint: r'.\SQLEXPRESS or localhost',
                 validator: _requiredValidator,
+                trailingAction: TextButton.icon(
+                  onPressed: _isDiscoveringInstances
+                      ? null
+                      : _browseSqlInstances,
+                  icon: _isDiscoveringInstances
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.travel_explore_outlined),
+                  label: const Text('Browse'),
+                ),
               ),
               const SizedBox(height: 16),
               _buildField(
@@ -1682,6 +1861,17 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                 label: 'Database name',
                 hint: 'EmployeeDB',
                 validator: _requiredValidator,
+                trailingAction: TextButton.icon(
+                  onPressed: _isDiscoveringDatabases ? null : _browseDatabases,
+                  icon: _isDiscoveringDatabases
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.manage_search_outlined),
+                  label: const Text('Browse'),
+                ),
               ),
               const SizedBox(height: 16),
               _buildField(
@@ -2322,6 +2512,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     bool obscureText = false,
     bool isPasswordVisible = false,
     VoidCallback? onTogglePasswordVisibility,
+    Widget? trailingAction,
   }) {
     return TextFormField(
       controller: controller,
@@ -2340,7 +2531,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                       : Icons.visibility_outlined,
                 ),
               )
-            : null,
+            : trailingAction,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
         filled: true,
         fillColor: Colors.white,

@@ -339,6 +339,15 @@ WITH INIT, COPY_ONLY, COMPRESSION, CHECKSUM;
   `;
 }
 
+function buildListDatabasesQuery() {
+  return `
+SET NOCOUNT ON;
+SELECT name
+FROM sys.databases
+ORDER BY name;
+  `;
+}
+
 function buildAttachmentStatusQuery(payload) {
   const databaseString = escapeSqlString(payload.databaseName);
   const mdfPath = escapeSqlString(String(payload.mdfPath || '').replace(/\//g, '\\'));
@@ -803,6 +812,87 @@ async function createActivityLog(payload) {
     actionName: String(payload.actionName || 'custom_event'),
     actionDetails: String(payload.actionDetails || ''),
   });
+}
+
+function discoverSqlInstances() {
+  return new Promise((resolve) => {
+    const child = spawn('sqlcmd', ['-L'], {
+      windowsHide: true,
+    });
+
+    let stdoutText = '';
+    let stderrText = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdoutText += chunk.toString();
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderrText += chunk.toString();
+    });
+
+    child.on('error', (error) => {
+      resolve({
+        success: false,
+        message: `Could not discover SQL instances. Details: ${error.message}`,
+        instances: [],
+      });
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        resolve({
+          success: false,
+          message: stderrText.trim() || `SQL instance discovery failed with exit code ${code}.`,
+          instances: [],
+        });
+        return;
+      }
+
+      const instances = Array.from(
+        new Set(
+          stdoutText
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line && !line.toLowerCase().includes('servers:')),
+        ),
+      ).sort();
+
+      resolve({
+        success: true,
+        message: instances.isEmpty
+            ? 'No SQL Server instances were discovered.'
+            : 'SQL Server instances discovered successfully.',
+        instances,
+      });
+    });
+  });
+}
+
+async function listDatabases(payload) {
+  const result = await runSqlcmd(payload, buildListDatabasesQuery());
+  if (!result.success) {
+    return {
+      success: false,
+      message: result.message,
+      databases: [],
+    };
+  }
+
+  const databases = result.message
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !/^changed database context/i.test(line))
+      .filter((line) => !/^name$/i.test(line))
+      .filter((line) => !/^[-]+$/.test(line));
+
+  return {
+    success: true,
+    message: databases.isEmpty
+        ? 'No databases were returned by SQL Server.'
+        : 'Databases loaded successfully.',
+    databases,
+  };
 }
 
 async function saveProfile(payload) {
@@ -1319,6 +1409,57 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 400, {
         success: false,
         message: error.message || 'Unable to process backup request.',
+      });
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/discovery/instances') {
+    try {
+      const result = await discoverSqlInstances();
+      sendJson(res, result.success ? 200 : 500, result);
+    } catch (error) {
+      sendJson(res, 500, {
+        success: false,
+        message: error.message || 'Could not discover SQL Server instances.',
+        instances: [],
+      });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/discovery/databases') {
+    try {
+      const payload = await readJsonBody(req);
+      if (!String(payload.server || '').trim()) {
+        sendJson(res, 400, {
+          success: false,
+          message: 'SQL Server instance is required.',
+          databases: [],
+        });
+        return;
+      }
+
+      if (
+        payload.authenticationMode === 'sqlServer' &&
+        (!String(payload.username || '').trim() ||
+            !String(payload.password || ''))
+      ) {
+        sendJson(res, 400, {
+          success: false,
+          message: 'SQL login credentials are required.',
+          databases: [],
+        });
+        return;
+      }
+
+      const result = await listDatabases(payload);
+      sendJson(res, result.success ? 200 : 500, result);
+    } catch (error) {
+      sendJson(res, 500, {
+        success: false,
+        message: error.message || 'Could not load databases.',
+        databases: [],
       });
     }
     return;

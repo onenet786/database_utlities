@@ -64,6 +64,61 @@ class ApiClient {
     return SecurityPreference.fromJson(body);
   }
 
+  Future<List<String>> discoverSqlInstances() async {
+    final uri = _buildUri('/api/discovery/instances');
+    if (uri == null) {
+      throw Exception('API connection is not configured.');
+    }
+
+    final response = await http.get(uri);
+    final body = _decodeBody(response.body);
+    if (body['success'] != true) {
+      throw Exception(
+        (body['message'] as String?) ??
+            'Could not discover SQL Server instances.',
+      );
+    }
+
+    return (body['instances'] as List<dynamic>? ?? const [])
+        .map((item) => item.toString())
+        .toList();
+  }
+
+  Future<List<String>> discoverDatabases({
+    required String server,
+    required AuthenticationMode authenticationMode,
+    required String username,
+    required String password,
+  }) async {
+    final uri = _buildUri('/api/discovery/databases');
+    if (uri == null) {
+      throw Exception('API connection is not configured.');
+    }
+
+    final response = await http.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'server': server,
+        'authenticationMode': authenticationMode == AuthenticationMode.windows
+            ? 'windows'
+            : 'sqlServer',
+        'username': username,
+        'password': password,
+      }),
+    );
+    final body = _decodeBody(response.body);
+    if (body['success'] != true) {
+      throw Exception(
+        (body['message'] as String?) ?? 'Could not load databases.',
+      );
+    }
+
+    return (body['databases'] as List<dynamic>? ?? const [])
+        .map((item) => item.toString())
+        .toList();
+  }
+
   Future<AppSession> login({
     required String username,
     required String password,
