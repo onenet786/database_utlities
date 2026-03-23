@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
@@ -30,10 +31,14 @@ class DatabaseUtilitiesApp extends StatefulWidget {
 
 class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
     with WidgetsBindingObserver {
+  static const Duration _sessionInactivityTimeout = Duration(seconds: 30);
+
   bool _isUnlocked = false;
   bool _isSplashComplete = false;
   AppSession? _currentSession;
   Timer? _splashTimer;
+  Timer? _sessionTimeoutTimer;
+  DateTime? _lastActivityAt;
   ApiClient get _apiClient =>
       ApiClient(baseUrl: dotenv.env['API_BASE_URL'] ?? '');
 
@@ -54,17 +59,33 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
   @override
   void dispose() {
     _splashTimer?.cancel();
+    _sessionTimeoutTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_isUnlocked) {
+      return;
+    }
+
+    if (state == AppLifecycleState.resumed) {
+      _syncSessionTimeoutWithActivity();
+      return;
+    }
+
+    if (state == AppLifecycleState.detached) {
+      _lockSession(
+        actionDetails: 'The workspace session was closed when the app detached.',
+      );
+      return;
+    }
+
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.hidden ||
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.detached) {
-      _lockSession();
+        state == AppLifecycleState.paused) {
+      _sessionTimeoutTimer?.cancel();
     }
   }
 
@@ -73,12 +94,59 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
       _currentSession = session;
       _isUnlocked = true;
     });
+    _registerSessionActivity();
   }
 
-  void _lockSession() {
+  void _registerSessionActivity() {
     if (!_isUnlocked) {
       return;
     }
+
+    _lastActivityAt = DateTime.now();
+    _scheduleSessionTimeout(_sessionInactivityTimeout);
+  }
+
+  void _scheduleSessionTimeout(Duration timeout) {
+    _sessionTimeoutTimer?.cancel();
+    if (!_isUnlocked) {
+      return;
+    }
+
+    _sessionTimeoutTimer = Timer(timeout, () {
+      _lockSession(
+        actionDetails:
+            'The workspace session expired after 30 seconds of inactivity.',
+      );
+    });
+  }
+
+  void _syncSessionTimeoutWithActivity() {
+    final lastActivityAt = _lastActivityAt;
+    if (!_isUnlocked || lastActivityAt == null) {
+      return;
+    }
+
+    final elapsed = DateTime.now().difference(lastActivityAt);
+    final remaining = _sessionInactivityTimeout - elapsed;
+    if (remaining <= Duration.zero) {
+      _lockSession(
+        actionDetails:
+            'The workspace session expired after 30 seconds of inactivity.',
+      );
+      return;
+    }
+
+    _scheduleSessionTimeout(remaining);
+  }
+
+  void _lockSession({
+    String actionDetails = 'The workspace session was locked.',
+  }) {
+    if (!_isUnlocked) {
+      return;
+    }
+
+    _sessionTimeoutTimer?.cancel();
 
     final session = _currentSession;
     if (session != null) {
@@ -88,7 +156,7 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
           actorUsername: session.username,
           actorRole: session.role == UserType.admin ? 'admin' : 'user',
           actionName: 'lock_session',
-          actionDetails: 'The workspace session was locked.',
+          actionDetails: actionDetails,
         ),
       );
     }
@@ -96,6 +164,7 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
     setState(() {
       _isUnlocked = false;
       _currentSession = null;
+      _lastActivityAt = null;
     });
   }
 
@@ -131,15 +200,47 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
         child: !_isSplashComplete
             ? const AppSplashScreen(key: ValueKey('splash'))
             : _isUnlocked
-            ? DatabaseUtilityHomePage(
-                key: const ValueKey('home'),
-                session: _currentSession!,
-                onLockRequested: _lockSession,
+            ? _SessionActivityScope(
+                key: const ValueKey('session-home'),
+                onActivity: _registerSessionActivity,
+                child: DatabaseUtilityHomePage(
+                  key: const ValueKey('home'),
+                  session: _currentSession!,
+                  onLockRequested: _lockSession,
+                ),
               )
             : LaunchGatePage(
                 key: const ValueKey('launch'),
                 onUnlock: _unlockSession,
               ),
+      ),
+    );
+  }
+}
+
+class _SessionActivityScope extends StatelessWidget {
+  const _SessionActivityScope({
+    super.key,
+    required this.child,
+    required this.onActivity,
+  });
+
+  final Widget child;
+  final VoidCallback onActivity;
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => onActivity(),
+      onPointerSignal: (_) => onActivity(),
+      child: Focus(
+        autofocus: true,
+        onKeyEvent: (_, _) {
+          onActivity();
+          return KeyEventResult.ignored;
+        },
+        child: child,
       ),
     );
   }
@@ -1123,12 +1224,22 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         return;
       }
 
-      final path = file.path;
+      final path = _resolvedLocalFilePath(file);
       final fileName = file.name;
       final dotIndex = fileName.lastIndexOf('.');
       final guessedName = dotIndex > 0
           ? fileName.substring(0, dotIndex)
           : fileName;
+
+      if (path == null) {
+        if (_databaseNameController.text.trim().isEmpty) {
+          setState(() {
+            _databaseNameController.text = guessedName;
+          });
+        }
+        _showBrowserPathLimitationMessage(fileLabel: 'MDF');
+        return;
+      }
 
       setState(() {
         _mdfPathController.text = path;
@@ -1172,8 +1283,14 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         return;
       }
 
+      final path = _resolvedLocalFilePath(file);
+      if (path == null) {
+        _showBrowserPathLimitationMessage(fileLabel: 'LDF');
+        return;
+      }
+
       setState(() {
-        _ldfPathController.text = file.path;
+        _ldfPathController.text = path;
       });
     } catch (error) {
       if (!mounted) {
@@ -1438,6 +1555,30 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     }
 
     _showOperationSnackBar(result);
+  }
+
+  String? _resolvedLocalFilePath(XFile file) {
+    final rawPath = file.path.trim();
+    if (rawPath.isEmpty) {
+      return null;
+    }
+
+    if (kIsWeb && rawPath.startsWith('blob:')) {
+      return null;
+    }
+
+    return rawPath;
+  }
+
+  void _showBrowserPathLimitationMessage({required String fileLabel}) {
+    _showOperationSnackBar(
+      OperationResult(
+        success: false,
+        message:
+            '$fileLabel browse is running in a browser, so only a temporary blob URL is available. Enter the full local Windows path manually, or run the Windows app to browse real file paths.',
+        command: '',
+      ),
+    );
   }
 
   void _showOperationSnackBar(OperationResult result) {
