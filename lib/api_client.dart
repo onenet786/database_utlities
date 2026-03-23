@@ -2,6 +2,10 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'activity_log_entry.dart';
+import 'app_session.dart';
+import 'app_user.dart';
+import 'client_settings.dart';
 import 'database_profile.dart';
 import 'operation_result.dart';
 import 'security_preference.dart';
@@ -11,12 +15,28 @@ class ApiClient {
 
   final String baseUrl;
 
-  Future<OperationResult> attach(DatabaseProfile profile) {
-    return _post('/api/databases/attach', profile);
+  Future<OperationResult> attach(
+    DatabaseProfile profile, {
+    required String actorUsername,
+    required String actorRole,
+  }) {
+    return _postJson('/api/databases/attach', {
+      ...profile.toJson(),
+      'actorUsername': actorUsername,
+      'actorRole': actorRole,
+    });
   }
 
-  Future<OperationResult> detach(DatabaseProfile profile) {
-    return _post('/api/databases/detach', profile);
+  Future<OperationResult> detach(
+    DatabaseProfile profile, {
+    required String actorUsername,
+    required String actorRole,
+  }) {
+    return _postJson('/api/databases/detach', {
+      ...profile.toJson(),
+      'actorUsername': actorUsername,
+      'actorRole': actorRole,
+    });
   }
 
   Future<String> fetchHealthMessage() async {
@@ -41,6 +61,27 @@ class ApiClient {
     return SecurityPreference.fromJson(body);
   }
 
+  Future<AppSession> login({
+    required String username,
+    required String password,
+  }) async {
+    final uri = _buildUri('/api/auth/login');
+    if (uri == null) {
+      throw Exception('API connection is not configured.');
+    }
+
+    final response = await http.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'username': username, 'password': password}),
+    );
+    final body = _decodeBody(response.body);
+    if (body['success'] != true) {
+      throw Exception((body['message'] as String?) ?? 'Authentication failed.');
+    }
+    return AppSession.fromJson(body);
+  }
+
   Future<void> saveSecurityPreference(SecurityPreference preference) async {
     final uri = _buildUri('/api/security/preferences');
     if (uri == null) {
@@ -60,6 +101,155 @@ class ApiClient {
     }
   }
 
+  Future<ClientSettings> fetchClientSettings() async {
+    final uri = _buildUri('/api/client/settings');
+    if (uri == null) {
+      throw Exception('API connection is not configured.');
+    }
+
+    final response = await http.get(uri);
+    final body = _decodeBody(response.body);
+    return ClientSettings.fromJson(body);
+  }
+
+  Future<void> saveClientSettings({
+    required ClientSettings settings,
+    required String actorUsername,
+    required String actorRole,
+  }) async {
+    final uri = _buildUri('/api/client/settings');
+    if (uri == null) {
+      throw Exception('API connection is not configured.');
+    }
+
+    final response = await http.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        ...settings.toJson(),
+        'actorUsername': actorUsername,
+        'actorRole': actorRole,
+      }),
+    );
+    final body = _decodeBody(response.body);
+    if (body['success'] != true) {
+      throw Exception(
+        (body['message'] as String?) ?? 'Could not save client settings.',
+      );
+    }
+  }
+
+  Future<List<AppUser>> fetchUsers() async {
+    final uri = _buildUri('/api/security/users');
+    if (uri == null) {
+      throw Exception('API connection is not configured.');
+    }
+
+    final response = await http.get(uri);
+    final body = _decodeBody(response.body);
+    return (body['users'] as List<dynamic>? ?? const [])
+        .map((item) => AppUser.fromJson(Map<String, dynamic>.from(item as Map)))
+        .toList();
+  }
+
+  Future<OperationResult> saveUser({
+    required AppUser user,
+    required String actorUsername,
+    required String actorRole,
+  }) async {
+    return _postJson('/api/security/users', {
+      ...user.toJson(),
+      'actorUsername': actorUsername,
+      'actorRole': actorRole,
+    });
+  }
+
+  Future<OperationResult> changeUserPassword({
+    required int userId,
+    required String password,
+    required String actorUsername,
+    required String actorRole,
+  }) async {
+    return _postJson('/api/security/users/password', {
+      'id': userId,
+      'password': password,
+      'actorUsername': actorUsername,
+      'actorRole': actorRole,
+    });
+  }
+
+  Future<OperationResult> deleteUser(
+    int id, {
+    required String actorUsername,
+    required String actorRole,
+  }) async {
+    final uri = _buildUri(
+      '/api/security/users/$id?actorUsername=${Uri.encodeQueryComponent(actorUsername)}&actorRole=${Uri.encodeQueryComponent(actorRole)}',
+    );
+    if (uri == null) {
+      return const OperationResult(
+        success: false,
+        message: 'API connection is not configured.',
+        command: '',
+      );
+    }
+
+    try {
+      final response = await http.delete(uri);
+      final body = _decodeBody(response.body);
+      return OperationResult(
+        success: body['success'] == true,
+        message: (body['message'] as String?) ?? 'Unexpected API response.',
+        command: '',
+      );
+    } catch (error) {
+      return OperationResult(
+        success: false,
+        message: 'Could not reach the API server. Details: $error',
+        command: '',
+      );
+    }
+  }
+
+  Future<List<ActivityLogEntry>> fetchActivityLogs({int limit = 100}) async {
+    final uri = _buildUri('/api/activity-logs?limit=$limit');
+    if (uri == null) {
+      throw Exception('API connection is not configured.');
+    }
+
+    final response = await http.get(uri);
+    final body = _decodeBody(response.body);
+    return (body['logs'] as List<dynamic>? ?? const [])
+        .map(
+          (item) =>
+              ActivityLogEntry.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .toList();
+  }
+
+  Future<void> logActivity({
+    required String actorUsername,
+    required String actorRole,
+    required String actionName,
+    required String actionDetails,
+  }) async {
+    final uri = _buildUri('/api/activity-logs');
+    if (uri == null) {
+      return;
+    }
+
+    await http.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'actorUsername': actorUsername,
+        'actorRole': actorRole,
+        'actionName': actionName,
+        'actionDetails': actionDetails,
+      }),
+    );
+  }
+
   Future<List<DatabaseProfile>> fetchProfiles() async {
     final uri = _buildUri('/api/settings/profiles');
     if (uri == null) {
@@ -75,12 +265,26 @@ class ApiClient {
     return items;
   }
 
-  Future<OperationResult> saveProfile(DatabaseProfile profile) {
-    return _post('/api/settings/profiles', profile);
+  Future<OperationResult> saveProfile(
+    DatabaseProfile profile, {
+    required String actorUsername,
+    required String actorRole,
+  }) {
+    return _postJson('/api/settings/profiles', {
+      ...profile.toJson(),
+      'actorUsername': actorUsername,
+      'actorRole': actorRole,
+    });
   }
 
-  Future<OperationResult> deleteProfile(int id) async {
-    final uri = _buildUri('/api/settings/profiles/$id');
+  Future<OperationResult> deleteProfile(
+    int id, {
+    required String actorUsername,
+    required String actorRole,
+  }) async {
+    final uri = _buildUri(
+      '/api/settings/profiles/$id?actorUsername=${Uri.encodeQueryComponent(actorUsername)}&actorRole=${Uri.encodeQueryComponent(actorRole)}',
+    );
     if (uri == null) {
       return const OperationResult(
         success: false,
@@ -107,6 +311,13 @@ class ApiClient {
   }
 
   Future<OperationResult> _post(String path, DatabaseProfile profile) async {
+    return _postJson(path, profile.toJson());
+  }
+
+  Future<OperationResult> _postJson(
+    String path,
+    Map<String, dynamic> bodyJson,
+  ) async {
     final uri = _buildUri(path);
     if (uri == null) {
       return const OperationResult(
@@ -120,7 +331,7 @@ class ApiClient {
       final response = await http.post(
         uri,
         headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode(profile.toJson()),
+        body: jsonEncode(bodyJson),
       );
 
       final body = response.body.isEmpty

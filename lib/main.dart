@@ -3,7 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'activity_log_entry.dart';
 import 'api_client.dart';
+import 'app_session.dart';
+import 'app_user.dart';
+import 'client_settings.dart';
 import 'database_profile.dart';
 import 'operation_result.dart';
 import 'security_preference.dart';
@@ -25,8 +29,10 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
     with WidgetsBindingObserver {
   bool _isUnlocked = false;
   bool _isSplashComplete = false;
-  UserType _currentUserType = UserType.admin;
+  AppSession? _currentSession;
   Timer? _splashTimer;
+  ApiClient get _apiClient =>
+      ApiClient(baseUrl: dotenv.env['API_BASE_URL'] ?? '');
 
   @override
   void initState() {
@@ -59,9 +65,9 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
     }
   }
 
-  void _unlockSession(UserType userType) {
+  void _unlockSession(AppSession session) {
     setState(() {
-      _currentUserType = userType;
+      _currentSession = session;
       _isUnlocked = true;
     });
   }
@@ -71,8 +77,21 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
       return;
     }
 
+    final session = _currentSession;
+    if (session != null) {
+      unawaited(
+        _apiClient.logActivity(
+          actorUsername: session.username,
+          actorRole: session.role == UserType.admin ? 'admin' : 'user',
+          actionName: 'lock_session',
+          actionDetails: 'The workspace session was locked.',
+        ),
+      );
+    }
+
     setState(() {
       _isUnlocked = false;
+      _currentSession = null;
     });
   }
 
@@ -110,7 +129,7 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
             : _isUnlocked
             ? DatabaseUtilityHomePage(
                 key: const ValueKey('home'),
-                userType: _currentUserType,
+                session: _currentSession!,
                 onLockRequested: _lockSession,
               )
             : LaunchGatePage(
@@ -229,13 +248,14 @@ class _AppSplashScreenState extends State<AppSplashScreen>
 class LaunchGatePage extends StatefulWidget {
   const LaunchGatePage({super.key, required this.onUnlock});
 
-  final ValueChanged<UserType> onUnlock;
+  final ValueChanged<AppSession> onUnlock;
 
   @override
   State<LaunchGatePage> createState() => _LaunchGatePageState();
 }
 
 class _LaunchGatePageState extends State<LaunchGatePage> {
+  final _usernameController = TextEditingController(text: 'admin');
   final _passwordController = TextEditingController();
   final ApiClient _apiClient = ApiClient(
     baseUrl: dotenv.env['API_BASE_URL'] ?? '',
@@ -243,69 +263,20 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
 
   String? _errorMessage;
   bool _isLaunchPasswordVisible = false;
-  bool _isLoadingPreference = true;
   bool _isSubmitting = false;
-  UserType _selectedUserType = UserType.admin;
-
-  String get _expectedPassword {
-    final now = DateTime.now();
-    const months = <String>[
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-
-    final day = now.day.toString().padLeft(2, '0');
-    final month = months[now.month - 1];
-    final year = now.year.toString();
-    return 'OneNet$day$month$year';
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSecurityPreference();
-  }
 
   @override
   void dispose() {
+    _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadSecurityPreference() async {
-    try {
-      final preference = await _apiClient.fetchSecurityPreference();
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _selectedUserType = preference.defaultUserType;
-        _isLoadingPreference = false;
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isLoadingPreference = false;
-      });
-    }
-  }
-
   Future<void> _unlock() async {
-    if (_passwordController.text.trim() != _expectedPassword) {
+    if (_usernameController.text.trim().isEmpty ||
+        _passwordController.text.isEmpty) {
       setState(() {
-        _errorMessage = 'Invalid launch password for today.';
+        _errorMessage = 'Username and password are required.';
       });
       return;
     }
@@ -316,19 +287,20 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
     });
 
     try {
-      await _apiClient.saveSecurityPreference(
-        SecurityPreference(defaultUserType: _selectedUserType),
+      final session = await _apiClient.login(
+        username: _usernameController.text.trim(),
+        password: _passwordController.text,
       );
       if (!mounted) {
         return;
       }
-      widget.onUnlock(_selectedUserType);
+      widget.onUnlock(session);
     } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
-        _errorMessage = 'Could not save security preference. Details: $error';
+        _errorMessage = 'Sign in failed. Details: $error';
         _isSubmitting = false;
       });
       return;
@@ -337,10 +309,6 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
 
   @override
   Widget build(BuildContext context) {
-    final introText = _selectedUserType == UserType.admin
-        ? 'Admin mode unlocks full configuration management, security settings, and attach-detach operations.'
-        : 'User mode keeps the experience focused on attaching and detaching saved databases only.';
-
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -351,28 +319,29 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
           ),
         ),
         child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
-              child: Padding(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(28),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const AppBrandMark(size: 58),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - 48,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 560),
+                      child: Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(28),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'Launch Security',
+                                    'Secure Sign In',
                                     style: Theme.of(context)
                                         .textTheme
                                         .headlineMedium
@@ -383,7 +352,7 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
-                                    'Choose your role, verify the daily password, and continue securely.',
+                                    'Use your assigned username and password to open the workspace.',
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium
@@ -393,152 +362,113 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
                                   ),
                                 ],
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-                        _SecuritySpotlightCard(
-                          title: _selectedUserType == UserType.admin
-                              ? 'Administrator Access'
-                              : 'Restricted User Access',
-                          description: introText,
-                          accent: _selectedUserType == UserType.admin
-                              ? const Color(0xFF0E7490)
-                              : const Color(0xFFE07A5F),
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          'User Type',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                color: const Color(0xFF113247),
+                              const SizedBox(height: 24),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF7FAFC),
+                                  borderRadius: BorderRadius.circular(24),
+                                  border: Border.all(
+                                    color: const Color(0xFFD8E2EC),
+                                  ),
+                                ),
+                                child: const Column(
+                                  children: [
+                                    AppBrandMark(size: 84, showHalo: true),
+                                  ],
+                                ),
                               ),
-                        ),
-                        const SizedBox(height: 12),
-                        IgnorePointer(
-                          ignoring: _isLoadingPreference || _isSubmitting,
-                          child: SegmentedButton<UserType>(
-                            showSelectedIcon: false,
-                            segments: const [
-                              ButtonSegment(
-                                value: UserType.admin,
-                                icon: Icon(Icons.admin_panel_settings_outlined),
-                                label: Text('Admin'),
+                              const SizedBox(height: 20),
+                              TextField(
+                                controller: _usernameController,
+                                enabled: !_isSubmitting,
+                                decoration: InputDecoration(
+                                  labelText: 'Username',
+                                  prefixIcon: Icon(Icons.person_outline),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.all(
+                                      Radius.circular(18),
+                                    ),
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                ),
                               ),
-                              ButtonSegment(
-                                value: UserType.user,
-                                icon: Icon(Icons.person_outline),
-                                label: Text('User'),
+                              const SizedBox(height: 16),
+                              TextField(
+                                controller: _passwordController,
+                                obscureText: !_isLaunchPasswordVisible,
+                                onSubmitted: (_) =>
+                                    _isSubmitting ? null : _unlock(),
+                                decoration: InputDecoration(
+                                  labelText: 'Password',
+                                  errorText: _errorMessage,
+                                  prefixIcon: const Icon(
+                                    Icons.password_outlined,
+                                  ),
+                                  suffixIcon: IconButton(
+                                    tooltip: _isLaunchPasswordVisible
+                                        ? 'Hide password'
+                                        : 'Show password',
+                                    onPressed: () {
+                                      setState(() {
+                                        _isLaunchPasswordVisible =
+                                            !_isLaunchPasswordVisible;
+                                      });
+                                    },
+                                    icon: Icon(
+                                      _isLaunchPasswordVisible
+                                          ? Icons.visibility_off_outlined
+                                          : Icons.visibility_outlined,
+                                    ),
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                ),
                               ),
-                            ],
-                            selected: {_selectedUserType},
-                            onSelectionChanged: (selection) {
-                              setState(() {
-                                _selectedUserType = selection.first;
-                              });
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        TextField(
-                          controller: _passwordController,
-                          obscureText: !_isLaunchPasswordVisible,
-                          onSubmitted: (_) => _isSubmitting ? null : _unlock(),
-                          decoration: InputDecoration(
-                            labelText: 'Launch password',
-                            hintText: 'OneNet21Mar2026',
-                            errorText: _errorMessage,
-                            prefixIcon: const Icon(Icons.password_outlined),
-                            suffixIcon: IconButton(
-                              tooltip: _isLaunchPasswordVisible
-                                  ? 'Hide password'
-                                  : 'Show password',
-                              onPressed: () {
-                                setState(() {
-                                  _isLaunchPasswordVisible =
-                                      !_isLaunchPasswordVisible;
-                                });
-                              },
-                              icon: Icon(
-                                _isLaunchPasswordVisible
-                                    ? Icons.visibility_off_outlined
-                                    : Icons.visibility_outlined,
-                              ),
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            filled: true,
-                            fillColor: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF7FAFC),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: const Color(0xFFD8E2EC)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.shield_moon_outlined,
-                                color: Color(0xFF0E7490),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  _isLoadingPreference
-                                      ? 'Loading saved security preference from MySQL...'
-                                      : 'Selected role is persisted in MySQL for the next launch.',
-                                  style: Theme.of(context).textTheme.bodyMedium
-                                      ?.copyWith(
-                                        color: const Color(0xFF4F6478),
-                                      ),
+                              const SizedBox(height: 18),
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.icon(
+                                  onPressed: _isSubmitting ? null : _unlock,
+                                  icon: _isSubmitting
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Icon(Icons.lock_open_outlined),
+                                  label: Text(
+                                    _isSubmitting
+                                        ? 'Securing Access...'
+                                        : 'Unlock Workspace',
+                                  ),
+                                  style: FilledButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 18,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(18),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: _isSubmitting || _isLoadingPreference
-                                ? null
-                                : _unlock,
-                            icon: _isSubmitting
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Icon(Icons.lock_open_outlined),
-                            label: Text(
-                              _isSubmitting
-                                  ? 'Securing Access...'
-                                  : 'Unlock Workspace',
-                            ),
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 18),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ),
       ),
@@ -549,11 +479,11 @@ class _LaunchGatePageState extends State<LaunchGatePage> {
 class DatabaseUtilityHomePage extends StatefulWidget {
   const DatabaseUtilityHomePage({
     super.key,
-    required this.userType,
+    required this.session,
     required this.onLockRequested,
   });
 
-  final UserType userType;
+  final AppSession session;
   final VoidCallback onLockRequested;
 
   @override
@@ -578,15 +508,32 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   String? _lastMessage;
   String? _apiStatusMessage;
   bool _isSqlPasswordVisible = false;
+  bool _isAppUserPasswordVisible = false;
+  ClientSettings? _clientSettings;
+  List<AppUser> _users = [];
+  List<ActivityLogEntry> _activityLogs = [];
+  bool _isLoadingAdminData = false;
+  final _companyNameController = TextEditingController();
+  final _branchNameController = TextEditingController();
+  final _appUsernameController = TextEditingController();
+  final _appUserPasswordController = TextEditingController();
+  UserType _appUserRole = UserType.user;
+  int? _editingUserId;
 
   String get _apiBaseUrl => dotenv.env['API_BASE_URL'] ?? '';
   ApiClient get _apiClient => ApiClient(baseUrl: _apiBaseUrl);
-  bool get _isAdmin => widget.userType == UserType.admin;
+  bool get _isAdmin => widget.session.role == UserType.admin;
 
   @override
   void initState() {
     super.initState();
+    _clientSettings = widget.session.clientSettings;
+    _companyNameController.text = widget.session.clientSettings.companyName;
+    _branchNameController.text = widget.session.clientSettings.branchName;
     _loadProfiles();
+    if (_isAdmin) {
+      _loadAdminData();
+    }
   }
 
   @override
@@ -597,8 +544,152 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     _ldfPathController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
+    _companyNameController.dispose();
+    _branchNameController.dispose();
+    _appUsernameController.dispose();
+    _appUserPasswordController.dispose();
     super.dispose();
   }
+
+  Future<void> _loadAdminData() async {
+    if (!_isAdmin) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingAdminData = true;
+    });
+
+    try {
+      final clientSettings = await _apiClient.fetchClientSettings();
+      final users = await _apiClient.fetchUsers();
+      final activityLogs = await _apiClient.fetchActivityLogs(limit: 120);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _clientSettings = clientSettings;
+        _companyNameController.text = clientSettings.companyName;
+        _branchNameController.text = clientSettings.branchName;
+        _users = users;
+        _activityLogs = activityLogs;
+        _isLoadingAdminData = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _lastMessage = 'Could not load admin data. Details: $error';
+        _isLoadingAdminData = false;
+      });
+    }
+  }
+
+  Future<void> _saveClientSettings() async {
+    if (!_isAdmin) {
+      return;
+    }
+
+    try {
+      final settings = ClientSettings(
+        companyName: _companyNameController.text.trim(),
+        branchName: _branchNameController.text.trim(),
+      );
+      await _apiClient.saveClientSettings(
+        settings: settings,
+        actorUsername: widget.session.username,
+        actorRole: _roleValue(widget.session.role),
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _clientSettings = settings;
+        _lastMessage = 'Client settings saved successfully.';
+      });
+      await _loadAdminData();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _lastMessage = 'Could not save client settings. Details: $error';
+      });
+    }
+  }
+
+  void _loadUserForEditing(AppUser user) {
+    _editingUserId = user.id;
+    _appUsernameController.text = user.username;
+    _appUserPasswordController.clear();
+    _appUserRole = user.role;
+    _isAppUserPasswordVisible = false;
+    setState(() {});
+  }
+
+  void _clearUserForm() {
+    _editingUserId = null;
+    _appUsernameController.clear();
+    _appUserPasswordController.clear();
+    _appUserRole = UserType.user;
+    _isAppUserPasswordVisible = false;
+    setState(() {});
+  }
+
+  Future<void> _saveAppUser() async {
+    if (!_isAdmin) {
+      return;
+    }
+
+    final result = await _apiClient.saveUser(
+      user: AppUser(
+        id: _editingUserId,
+        username: _appUsernameController.text.trim(),
+        password: _appUserPasswordController.text,
+        role: _appUserRole,
+      ),
+      actorUsername: widget.session.username,
+      actorRole: _roleValue(widget.session.role),
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _lastMessage = result.message;
+    });
+    if (result.success) {
+      _clearUserForm();
+      await _loadAdminData();
+    }
+    _showOperationSnackBar(result);
+  }
+
+  Future<void> _deleteAppUser(AppUser user) async {
+    if (!_isAdmin || user.id == null) {
+      return;
+    }
+
+    final result = await _apiClient.deleteUser(
+      user.id!,
+      actorUsername: widget.session.username,
+      actorRole: _roleValue(widget.session.role),
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _lastMessage = result.message;
+    });
+    if (result.success) {
+      await _loadAdminData();
+    }
+    _showOperationSnackBar(result);
+  }
+
+  String _roleValue(UserType role) => role == UserType.admin ? 'admin' : 'user';
 
   Future<void> _loadProfiles() async {
     setState(() {
@@ -690,7 +781,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           : 'Updating settings in MySQL...';
     });
 
-    final result = await _apiClient.saveProfile(profile);
+    final result = await _apiClient.saveProfile(
+      profile,
+      actorUsername: widget.session.username,
+      actorRole: _roleValue(widget.session.role),
+    );
     if (!mounted) {
       return;
     }
@@ -725,7 +820,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       _lastMessage = 'Deleting saved setting for ${profile.databaseName}...';
     });
 
-    final result = await _apiClient.deleteProfile(profile.id!);
+    final result = await _apiClient.deleteProfile(
+      profile.id!,
+      actorUsername: widget.session.username,
+      actorRole: _roleValue(widget.session.role),
+    );
     if (!mounted) {
       return;
     }
@@ -798,7 +897,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     await _runOperation(
       index: index,
       actionLabel: 'attach',
-      request: _apiClient.attach,
+      request: (profile) => _apiClient.attach(
+        profile,
+        actorUsername: widget.session.username,
+        actorRole: _roleValue(widget.session.role),
+      ),
     );
   }
 
@@ -839,7 +942,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     await _runOperation(
       index: index,
       actionLabel: 'detach',
-      request: _apiClient.detach,
+      request: (profile) => _apiClient.detach(
+        profile,
+        actorUsername: widget.session.username,
+        actorRole: _roleValue(widget.session.role),
+      ),
     );
   }
 
@@ -915,26 +1022,32 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           children: [
             const AppBrandMark(size: 34),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Database Utilities'),
-                Text(
-                  _isAdmin
-                      ? 'Administrator workspace'
-                      : 'Restricted operator workspace',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: const Color(0xFF4F6478),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Database Utilities',
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-              ],
+                  Text(
+                    '${_clientSettings?.companyName ?? 'Database Utilities'} • ${_clientSettings?.branchName ?? 'Main Branch'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: const Color(0xFF4F6478),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: Center(child: _RoleBadge(userType: widget.userType)),
+            child: Center(child: _RoleBadge(userType: widget.session.role)),
           ),
           IconButton(
             tooltip: 'Reload settings',
@@ -979,6 +1092,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         );
         final formPanel = _buildFormPanel(headline);
         final listPanel = _buildProfilesPanel(headline);
+        final clientPanel = _buildClientPanel(headline);
+        final userPanel = _buildUserPanel(headline);
+        final activityPanel = _buildActivityPanel(headline);
 
         return ListView(
           padding: const EdgeInsets.all(20),
@@ -999,6 +1115,23 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
               const SizedBox(height: 20),
               listPanel,
             ],
+            const SizedBox(height: 20),
+            if (isWide)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: clientPanel),
+                  const SizedBox(width: 20),
+                  Expanded(child: userPanel),
+                ],
+              )
+            else ...[
+              clientPanel,
+              const SizedBox(height: 20),
+              userPanel,
+            ],
+            const SizedBox(height: 20),
+            activityPanel,
           ],
         );
       },
@@ -1199,7 +1332,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                 _buildField(
                   controller: _passwordController,
                   label: 'Password',
-                  hint: 'Enter SQL password',
+                  hint: '',
                   obscureText: true,
                   isPasswordVisible: _isSqlPasswordVisible,
                   onTogglePasswordVisibility: () {
@@ -1235,6 +1368,238 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildClientPanel(TextStyle? headline) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Client Settings', style: headline),
+            const SizedBox(height: 8),
+            Text(
+              'Customize the company and branch labels used by this deployment.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4F6478)),
+            ),
+            const SizedBox(height: 20),
+            _buildField(
+              controller: _companyNameController,
+              label: 'Company name',
+              hint: 'Acme Corporation',
+              validator: _requiredValidator,
+            ),
+            const SizedBox(height: 16),
+            _buildField(
+              controller: _branchNameController,
+              label: 'Branch name',
+              hint: 'Lahore Branch',
+              validator: _requiredValidator,
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _saveClientSettings,
+                icon: const Icon(Icons.apartment_outlined),
+                label: const Text('Save Client Settings'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUserPanel(TextStyle? headline) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Users & Roles', style: headline),
+            const SizedBox(height: 8),
+            Text(
+              'Create users, edit roles, and change passwords for different client branches.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4F6478)),
+            ),
+            const SizedBox(height: 20),
+            _buildField(
+              controller: _appUsernameController,
+              label: 'Username',
+              hint: 'operator01',
+              validator: _requiredValidator,
+            ),
+            const SizedBox(height: 16),
+            _buildField(
+              controller: _appUserPasswordController,
+              label: _editingUserId == null ? 'Password' : 'New password',
+              hint: '',
+              obscureText: true,
+              isPasswordVisible: _isAppUserPasswordVisible,
+              onTogglePasswordVisibility: () {
+                setState(() {
+                  _isAppUserPasswordVisible = !_isAppUserPasswordVisible;
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+            SegmentedButton<UserType>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                  value: UserType.admin,
+                  icon: Icon(Icons.admin_panel_settings_outlined),
+                  label: Text('Admin'),
+                ),
+                ButtonSegment(
+                  value: UserType.user,
+                  icon: Icon(Icons.person_outline),
+                  label: Text('User'),
+                ),
+              ],
+              selected: {_appUserRole},
+              onSelectionChanged: (selection) {
+                setState(() {
+                  _appUserRole = selection.first;
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                FilledButton.icon(
+                  onPressed: _saveAppUser,
+                  icon: const Icon(Icons.person_add_alt_1_outlined),
+                  label: Text(
+                    _editingUserId == null ? 'Save User' : 'Update User',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _clearUserForm,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Clear'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            if (_isLoadingAdminData)
+              const Center(child: CircularProgressIndicator())
+            else
+              ..._users.map(
+                (user) => Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: const Color(0xFFD8E2EC)),
+                  ),
+                  child: Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    runSpacing: 12,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            user.username,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          Text(_roleValue(user.role)),
+                        ],
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton(
+                            onPressed: () => _loadUserForEditing(user),
+                            child: const Text('Edit'),
+                          ),
+                          OutlinedButton(
+                            onPressed: user.id == null
+                                ? null
+                                : () => _deleteAppUser(user),
+                            child: const Text('Delete'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActivityPanel(TextStyle? headline) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Activity Logs', style: headline),
+            const SizedBox(height: 8),
+            Text(
+              'Every significant user action is recorded for audit and support purposes.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF4F6478)),
+            ),
+            const SizedBox(height: 20),
+            if (_isLoadingAdminData)
+              const Center(child: CircularProgressIndicator())
+            else if (_activityLogs.isEmpty)
+              const Text('No activity logs recorded yet.')
+            else
+              ..._activityLogs
+                  .take(40)
+                  .map(
+                    (log) => Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: const Color(0xFFD8E2EC)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${log.actorUsername} • ${log.actionName}',
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(log.actionDetails),
+                          const SizedBox(height: 4),
+                          Text(
+                            log.createdAt,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: const Color(0xFF4F6478)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+          ],
         ),
       ),
     );
