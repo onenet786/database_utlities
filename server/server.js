@@ -80,6 +80,7 @@ async function initializeStorage() {
       database_name VARCHAR(255) NOT NULL,
       mdf_path TEXT NOT NULL,
       ldf_path TEXT NULL,
+      backup_directory TEXT NULL,
       authentication_mode VARCHAR(20) NOT NULL,
       username VARCHAR(255) NULL,
       password TEXT NULL,
@@ -90,6 +91,9 @@ async function initializeStorage() {
   `);
   await pool.query(
     'ALTER TABLE database_profiles ADD COLUMN IF NOT EXISTS client_id INT NOT NULL DEFAULT 1 AFTER id',
+  );
+  await pool.query(
+    'ALTER TABLE database_profiles ADD COLUMN IF NOT EXISTS backup_directory TEXT NULL AFTER ldf_path',
   );
 
   await pool.query(`
@@ -497,7 +501,7 @@ async function resolveAttachmentStatus(profile) {
 
 async function listProfiles(clientId) {
   const [rows] = await pool.query(
-    `SELECT id, client_id, server, database_name, mdf_path, ldf_path, authentication_mode, username, password
+    `SELECT id, client_id, server, database_name, mdf_path, ldf_path, backup_directory, authentication_mode, username, password
      FROM database_profiles
      WHERE client_id = ?
      ORDER BY id DESC`,
@@ -511,6 +515,7 @@ async function listProfiles(clientId) {
     databaseName: row.database_name,
     mdfPath: row.mdf_path,
     ldfPath: row.ldf_path || '',
+    backupDirectory: row.backup_directory || '',
     authenticationMode: row.authentication_mode,
     username: row.username || '',
     password: row.password || '',
@@ -903,6 +908,7 @@ async function saveProfile(payload) {
     payload.databaseName,
     payload.mdfPath,
     payload.ldfPath || '',
+    payload.backupDirectory || '',
     payload.authenticationMode,
     payload.username || '',
     payload.password || '',
@@ -914,11 +920,12 @@ async function saveProfile(payload) {
        SET client_id = ?,
             server = ?,
             database_name = ?,
-           mdf_path = ?,
-           ldf_path = ?,
-           authentication_mode = ?,
-           username = ?,
-           password = ?
+            mdf_path = ?,
+            ldf_path = ?,
+            backup_directory = ?,
+            authentication_mode = ?,
+            username = ?,
+            password = ?
        WHERE id = ? AND client_id = ?`,
       [...values, payload.id, clientId],
     );
@@ -932,10 +939,11 @@ async function saveProfile(payload) {
       database_name,
       mdf_path,
       ldf_path,
+      backup_directory,
       authentication_mode,
       username,
       password
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     values,
   );
   return 'Settings saved successfully.';

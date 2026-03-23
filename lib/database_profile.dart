@@ -12,6 +12,7 @@ class DatabaseProfile {
     required this.authenticationMode,
     this.attachmentStatus = DatabaseAttachmentStatus.unknown,
     this.ldfPath = '',
+    this.backupDirectory = '',
     this.username = '',
     this.password = '',
   });
@@ -22,6 +23,7 @@ class DatabaseProfile {
   final String databaseName;
   final String mdfPath;
   final String ldfPath;
+  final String backupDirectory;
   final AuthenticationMode authenticationMode;
   final String username;
   final String password;
@@ -47,6 +49,9 @@ class DatabaseProfile {
           .toString(),
       mdfPath: (json['mdfPath'] ?? json['mdf_path'] ?? '').toString(),
       ldfPath: (json['ldfPath'] ?? json['ldf_path'] ?? '').toString(),
+      backupDirectory:
+          (json['backupDirectory'] ?? json['backup_directory'] ?? '')
+              .toString(),
       authenticationMode: authenticationModeValue == 'sqlServer'
           ? AuthenticationMode.sqlServer
           : AuthenticationMode.windows,
@@ -69,6 +74,7 @@ class DatabaseProfile {
       'databaseName': databaseName,
       'mdfPath': mdfPath,
       'ldfPath': ldfPath,
+      'backupDirectory': backupDirectory,
       'authenticationMode': authenticationMode == AuthenticationMode.windows
           ? 'windows'
           : 'sqlServer',
@@ -90,6 +96,7 @@ class DatabaseProfile {
     String? databaseName,
     String? mdfPath,
     String? ldfPath,
+    String? backupDirectory,
     AuthenticationMode? authenticationMode,
     String? username,
     String? password,
@@ -102,6 +109,7 @@ class DatabaseProfile {
       databaseName: databaseName ?? this.databaseName,
       mdfPath: mdfPath ?? this.mdfPath,
       ldfPath: ldfPath ?? this.ldfPath,
+      backupDirectory: backupDirectory ?? this.backupDirectory,
       authenticationMode: authenticationMode ?? this.authenticationMode,
       username: username ?? this.username,
       password: password ?? this.password,

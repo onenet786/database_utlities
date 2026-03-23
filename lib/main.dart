@@ -16,6 +16,18 @@ import 'security_preference.dart';
 
 enum _DetachAction { cancel, detachOnly, backupAndDetach }
 
+class _BackupDialogResult {
+  const _BackupDialogResult({
+    required this.confirmed,
+    required this.backupPath,
+    this.detachAction,
+  });
+
+  final bool confirmed;
+  final String backupPath;
+  final _DetachAction? detachAction;
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
@@ -603,6 +615,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   final _databaseNameController = TextEditingController();
   final _mdfPathController = TextEditingController();
   final _ldfPathController = TextEditingController();
+  final _backupDirectoryController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -650,6 +663,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     _appUserClientId = widget.session.clientId;
     _companyNameController.text = widget.session.clientSettings.companyName;
     _branchNameController.text = widget.session.clientSettings.branchName;
+    _serverController.addListener(_refreshDraftBackupPreview);
+    _databaseNameController.addListener(_refreshDraftBackupPreview);
+    _mdfPathController.addListener(_refreshDraftBackupPreview);
+    _ldfPathController.addListener(_refreshDraftBackupPreview);
+    _backupDirectoryController.addListener(_refreshDraftBackupPreview);
     _loadProfiles();
     if (_isAdmin) {
       _loadAdminData();
@@ -662,6 +680,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     _databaseNameController.dispose();
     _mdfPathController.dispose();
     _ldfPathController.dispose();
+    _backupDirectoryController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
     _companyNameController.dispose();
@@ -915,6 +934,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     _databaseNameController.clear();
     _mdfPathController.clear();
     _ldfPathController.clear();
+    _backupDirectoryController.clear();
     _usernameController.clear();
     _passwordController.clear();
     _authenticationMode = AuthenticationMode.windows;
@@ -933,6 +953,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     _databaseNameController.text = profile.databaseName;
     _mdfPathController.text = profile.mdfPath;
     _ldfPathController.text = profile.ldfPath;
+    _backupDirectoryController.text = profile.backupDirectory;
     _usernameController.text = profile.username;
     _passwordController.text = profile.password;
     _authenticationMode = profile.authenticationMode;
@@ -956,6 +977,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       databaseName: _databaseNameController.text.trim(),
       mdfPath: _mdfPathController.text.trim(),
       ldfPath: _ldfPathController.text.trim(),
+      backupDirectory: _backupDirectoryController.text.trim(),
       authenticationMode: _authenticationMode,
       username: _usernameController.text.trim(),
       password: _passwordController.text,
@@ -1040,12 +1062,35 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     final now = DateTime.now();
     final timestamp =
         '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
-    final normalizedPath = profile.mdfPath.replaceAll('/', r'\');
-    final separatorIndex = normalizedPath.lastIndexOf(r'\');
-    final baseDir = separatorIndex >= 0
-        ? normalizedPath.substring(0, separatorIndex)
-        : normalizedPath;
+    final baseDir = profile.backupDirectory.trim().isNotEmpty
+        ? profile.backupDirectory.trim().replaceAll('/', r'\')
+        : (() {
+            final normalizedPath = profile.mdfPath.replaceAll('/', r'\');
+            final separatorIndex = normalizedPath.lastIndexOf(r'\');
+            return separatorIndex >= 0
+                ? normalizedPath.substring(0, separatorIndex)
+                : normalizedPath;
+          })();
     return '$baseDir\\${profile.databaseName}_$timestamp.bak';
+  }
+
+  String _extractFileName(String fullPath) {
+    final normalized = fullPath.replaceAll('/', r'\');
+    final separatorIndex = normalized.lastIndexOf(r'\');
+    return separatorIndex >= 0
+        ? normalized.substring(separatorIndex + 1)
+        : normalized;
+  }
+
+  String _joinWindowsPath(String directory, String fileName) {
+    final trimmedDirectory = directory.trim().replaceAll('/', r'\');
+    if (trimmedDirectory.isEmpty) {
+      return fileName;
+    }
+    if (trimmedDirectory.endsWith(r'\')) {
+      return '$trimmedDirectory$fileName';
+    }
+    return '$trimmedDirectory\\$fileName';
   }
 
   String _buildDraftBackupPreviewPath() {
@@ -1059,11 +1104,19 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           ? r'C:\SQLData\DatabaseName.mdf'
           : _mdfPathController.text.trim(),
       ldfPath: _ldfPathController.text.trim(),
+      backupDirectory: _backupDirectoryController.text.trim(),
       authenticationMode: _authenticationMode,
       username: _usernameController.text.trim(),
       password: _passwordController.text,
     );
     return _buildBackupPath(draftProfile);
+  }
+
+  void _refreshDraftBackupPreview() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 
   Future<OperationResult> _runBackupOnly(
@@ -1078,40 +1131,123 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     );
   }
 
-  Future<void> _backupDatabase(int index) async {
-    final profile = _profiles[index];
-    final backupPath = _buildBackupPath(profile);
-    final shouldBackup = await showDialog<bool>(
+  Future<_BackupDialogResult?> _showBackupDialog({
+    required String title,
+    required String introText,
+    required String initialBackupPath,
+    required bool includeDetachOptions,
+  }) {
+    final backupPathController = TextEditingController(text: initialBackupPath);
+
+    return showDialog<_BackupDialogResult>(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Confirm Backup'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Create a backup for ${profile.databaseName} before any change?',
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> browseFolder() async {
+              final selectedDirectory = await getDirectoryPath(
+                confirmButtonText: 'Use folder',
+              );
+              if (!dialogContext.mounted || selectedDirectory == null) {
+                return;
+              }
+              final fileName = _extractFileName(
+                backupPathController.text.trim(),
+              );
+              setDialogState(() {
+                backupPathController.text = _joinWindowsPath(
+                  selectedDirectory,
+                  fileName,
+                );
+              });
+            }
+
+            return AlertDialog(
+              title: Text(title),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(introText),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: backupPathController,
+                      decoration: InputDecoration(
+                        labelText: 'Backup file path',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: browseFolder,
+                        icon: const Icon(Icons.folder_open_outlined),
+                        label: const Text('Browse Folder'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-              _dialogInfoLine('Backup file', backupPath),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Backup'),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(
+                    const _BackupDialogResult(confirmed: false, backupPath: ''),
+                  ),
+                  child: const Text('Cancel'),
+                ),
+                if (includeDetachOptions)
+                  OutlinedButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(
+                      _BackupDialogResult(
+                        confirmed: true,
+                        backupPath: backupPathController.text.trim(),
+                        detachAction: _DetachAction.detachOnly,
+                      ),
+                    ),
+                    child: const Text('Detach Only'),
+                  ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(
+                    _BackupDialogResult(
+                      confirmed: true,
+                      backupPath: backupPathController.text.trim(),
+                      detachAction: includeDetachOptions
+                          ? _DetachAction.backupAndDetach
+                          : null,
+                    ),
+                  ),
+                  child: Text(
+                    includeDetachOptions ? 'Backup & Detach' : 'Backup',
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
+    ).whenComplete(backupPathController.dispose);
+  }
+
+  Future<void> _backupDatabase(int index) async {
+    final profile = _profiles[index];
+    final backupDialogResult = await _showBackupDialog(
+      title: 'Confirm Backup',
+      introText:
+          'Create a backup for ${profile.databaseName} before any change?',
+      initialBackupPath: _buildBackupPath(profile),
+      includeDetachOptions: false,
     );
 
-    if (!mounted || shouldBackup != true) {
+    if (!mounted ||
+        backupDialogResult == null ||
+        !backupDialogResult.confirmed ||
+        backupDialogResult.backupPath.trim().isEmpty) {
       return;
     }
 
@@ -1120,7 +1256,10 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       _lastMessage = 'Creating backup for ${profile.databaseName}...';
     });
 
-    final result = await _runBackupOnly(profile, backupPath: backupPath);
+    final result = await _runBackupOnly(
+      profile,
+      backupPath: backupDialogResult.backupPath.trim(),
+    );
     if (!mounted) {
       return;
     }
@@ -1340,6 +1479,19 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     }
   }
 
+  Future<void> _pickBackupDirectory() async {
+    final selectedDirectory = await getDirectoryPath(
+      confirmButtonText: 'Use folder',
+    );
+    if (!mounted || selectedDirectory == null) {
+      return;
+    }
+
+    setState(() {
+      _backupDirectoryController.text = selectedDirectory;
+    });
+  }
+
   Future<String?> _showStringSelectionDialog({
     required String title,
     required List<String> items,
@@ -1441,55 +1593,23 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
   Future<void> _detachDatabase(int index) async {
     final profile = _profiles[index];
-    final backupPath = _buildBackupPath(profile);
-    final detachAction = await showDialog<_DetachAction>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Confirm Detach'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Detaching ${profile.databaseName} will disconnect active users and rollback uncommitted transactions.',
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Recommended backup file:',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 6),
-              Text(backupPath),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(_DetachAction.cancel),
-              child: const Text('Cancel'),
-            ),
-            OutlinedButton(
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(_DetachAction.detachOnly),
-              child: const Text('Detach Only'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(
-                dialogContext,
-              ).pop(_DetachAction.backupAndDetach),
-              child: const Text('Backup & Detach'),
-            ),
-          ],
-        );
-      },
+    final backupDialogResult = await _showBackupDialog(
+      title: 'Confirm Detach',
+      introText:
+          'Detaching ${profile.databaseName} will disconnect active users and rollback uncommitted transactions.',
+      initialBackupPath: _buildBackupPath(profile),
+      includeDetachOptions: true,
     );
 
     if (!mounted) {
       return;
     }
 
-    if (detachAction == null || detachAction == _DetachAction.cancel) {
+    final detachAction = backupDialogResult?.detachAction;
+    if (backupDialogResult == null ||
+        !backupDialogResult.confirmed ||
+        detachAction == null ||
+        detachAction == _DetachAction.cancel) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: Colors.blueGrey.shade700,
@@ -1506,7 +1626,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       });
       final backupResult = await _runBackupOnly(
         profile,
-        backupPath: backupPath,
+        backupPath: backupDialogResult.backupPath.trim(),
       );
       if (!mounted) {
         return;
@@ -2168,6 +2288,17 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                   label: const Text('Browse'),
                 ),
               ),
+              const SizedBox(height: 16),
+              _buildField(
+                controller: _backupDirectoryController,
+                label: 'Default backup folder',
+                hint: r'D:\SQLBackups',
+                trailingAction: TextButton.icon(
+                  onPressed: _pickBackupDirectory,
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                  label: const Text('Browse'),
+                ),
+              ),
               const SizedBox(height: 12),
               Container(
                 width: double.infinity,
@@ -2784,6 +2915,13 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                             const SizedBox(height: 8),
                             _infoLine('LDF', profile.ldfPath),
                           ],
+                          const SizedBox(height: 8),
+                          _infoLine(
+                            'Backup folder',
+                            profile.backupDirectory.trim().isEmpty
+                                ? 'MDF folder default'
+                                : profile.backupDirectory,
+                          ),
                           const SizedBox(height: 8),
                           _infoLine(
                             'Auth',
