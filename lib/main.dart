@@ -77,7 +77,8 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
 
     if (state == AppLifecycleState.detached) {
       _lockSession(
-        actionDetails: 'The workspace session was closed when the app detached.',
+        actionDetails:
+            'The workspace session was closed when the app detached.',
       );
       return;
     }
@@ -627,6 +628,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   final _appUsernameController = TextEditingController();
   final _appUserPasswordController = TextEditingController();
   UserType _appUserRole = UserType.user;
+  int? _appUserClientId;
   int? _editingClientId;
   int? _selectedClientId;
   int? _editingUserId;
@@ -645,6 +647,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     super.initState();
     _clientSettings = widget.session.clientSettings;
     _selectedClientId = widget.session.clientId;
+    _appUserClientId = widget.session.clientId;
     _companyNameController.text = widget.session.clientSettings.companyName;
     _branchNameController.text = widget.session.clientSettings.branchName;
     _loadProfiles();
@@ -718,6 +721,10 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
           _selectedClientId = activeClient.id;
         } else if (!_clients.any((client) => client.id == _selectedClientId)) {
           _selectedClientId = null;
+        }
+        if (_appUserClientId == null ||
+            !_clients.any((client) => client.id == _appUserClientId)) {
+          _appUserClientId = activeClient.id;
         }
         _users = users;
         _activityLogs = activityLogs;
@@ -796,6 +803,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   void _loadUserForEditing(AppUser user) {
     _editingUserId = user.id;
     _selectedUserId = user.id;
+    _appUserClientId = user.clientId ?? _activeClientId;
     _appUsernameController.text = user.username;
     _appUserPasswordController.clear();
     _appUserRole = user.role;
@@ -806,6 +814,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   void _clearUserForm() {
     _editingUserId = null;
     _selectedUserId = null;
+    _appUserClientId = _activeClientId;
     _appUsernameController.clear();
     _appUserPasswordController.clear();
     _appUserRole = UserType.user;
@@ -824,8 +833,9 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         username: _appUsernameController.text.trim(),
         password: _appUserPasswordController.text,
         role: _appUserRole,
+        clientId: _appUserClientId ?? _activeClientId,
       ),
-      clientId: _activeClientId,
+      clientId: _appUserClientId ?? _activeClientId,
       actorUsername: widget.session.username,
       actorRole: _roleValue(widget.session.role),
     );
@@ -1036,6 +1046,24 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         ? normalizedPath.substring(0, separatorIndex)
         : normalizedPath;
     return '$baseDir\\${profile.databaseName}_$timestamp.bak';
+  }
+
+  String _buildDraftBackupPreviewPath() {
+    final draftProfile = DatabaseProfile(
+      clientId: _activeClientId,
+      server: _serverController.text.trim(),
+      databaseName: _databaseNameController.text.trim().isEmpty
+          ? 'DatabaseName'
+          : _databaseNameController.text.trim(),
+      mdfPath: _mdfPathController.text.trim().isEmpty
+          ? r'C:\SQLData\DatabaseName.mdf'
+          : _mdfPathController.text.trim(),
+      ldfPath: _ldfPathController.text.trim(),
+      authenticationMode: _authenticationMode,
+      username: _usernameController.text.trim(),
+      password: _passwordController.text,
+    );
+    return _buildBackupPath(draftProfile);
   }
 
   Future<OperationResult> _runBackupOnly(
@@ -2140,6 +2168,35 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                   label: const Text('Browse'),
                 ),
               ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: const Color(0xFFD8E2EC)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Backup file preview',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: const Color(0xFF355468),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _buildDraftBackupPreviewPath(),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFF4F6478),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 20),
               SegmentedButton<AuthenticationMode>(
                 showSelectedIcon: false,
@@ -2355,6 +2412,34 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
               },
             ),
             const SizedBox(height: 16),
+            DropdownButtonFormField<int>(
+              initialValue: _appUserClientId,
+              decoration: InputDecoration(
+                labelText: 'Assigned client',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+              items: _clients
+                  .map(
+                    (client) => DropdownMenuItem<int>(
+                      value: client.id,
+                      child: Text(
+                        '${client.companyName} / ${client.branchName}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                setState(() {
+                  _appUserClientId = value;
+                });
+              },
+            ),
+            const SizedBox(height: 16),
             SegmentedButton<UserType>(
               showSelectedIcon: false,
               segments: const [
@@ -2445,6 +2530,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
               headingRowColor: WidgetStateProperty.all(const Color(0xFFE7F4F7)),
               columns: const [
                 DataColumn(label: Text('Username')),
+                DataColumn(label: Text('Client')),
                 DataColumn(label: Text('Role')),
                 DataColumn(label: Text('Edit')),
                 DataColumn(label: Text('Delete')),
@@ -2463,6 +2549,14 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                   cells: [
                     DataCell(
                       Text(user.username),
+                      onDoubleTap: () => _loadUserForEditing(user),
+                    ),
+                    DataCell(
+                      Text(
+                        user.clientName.isEmpty
+                            ? '-'
+                            : '${user.clientName} / ${user.branchName}',
+                      ),
                       onDoubleTap: () => _loadUserForEditing(user),
                     ),
                     DataCell(
