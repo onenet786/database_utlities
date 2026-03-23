@@ -509,6 +509,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   bool _isSqlPasswordVisible = false;
   bool _isAppUserPasswordVisible = false;
   ClientSettings? _clientSettings;
+  List<ClientSettings> _clients = [];
   List<AppUser> _users = [];
   List<ActivityLogEntry> _activityLogs = [];
   bool _isLoadingAdminData = false;
@@ -517,6 +518,8 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   final _appUsernameController = TextEditingController();
   final _appUserPasswordController = TextEditingController();
   UserType _appUserRole = UserType.user;
+  int? _editingClientId;
+  int? _selectedClientId;
   int? _editingUserId;
   int? _selectedUserId;
   AdminSection _selectedAdminSection = AdminSection.dashboard;
@@ -562,17 +565,44 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
     });
 
     try {
-      final clientSettings = await _apiClient.fetchClientSettings();
+      final clients = await _apiClient.fetchClientSettingsList();
       final users = await _apiClient.fetchUsers();
       final activityLogs = await _apiClient.fetchActivityLogs(limit: 120);
       if (!mounted) {
         return;
       }
 
+      ClientSettings? selectedClient;
+      if (_selectedClientId != null) {
+        final selectedIndex = clients.indexWhere(
+          (client) => client.id == _selectedClientId,
+        );
+        if (selectedIndex >= 0) {
+          selectedClient = clients[selectedIndex];
+        }
+      }
+      final activeClient =
+          selectedClient ??
+          (clients.isNotEmpty
+              ? clients.first
+              : const ClientSettings(
+                  id: 1,
+                  companyName: 'Database Utilities',
+                  branchName: 'Main Branch',
+                ));
+
       setState(() {
-        _clientSettings = clientSettings;
-        _companyNameController.text = clientSettings.companyName;
-        _branchNameController.text = clientSettings.branchName;
+        _clientSettings = activeClient;
+        _clients = clients;
+        if (_editingClientId == null) {
+          _companyNameController.text = activeClient.companyName;
+          _branchNameController.text = activeClient.branchName;
+        }
+        if (_editingClientId == null) {
+          _selectedClientId = activeClient.id;
+        } else if (!_clients.any((client) => client.id == _selectedClientId)) {
+          _selectedClientId = null;
+        }
         _users = users;
         _activityLogs = activityLogs;
         if (_selectedUserId != null &&
@@ -600,10 +630,11 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
 
     try {
       final settings = ClientSettings(
+        id: _editingClientId,
         companyName: _companyNameController.text.trim(),
         branchName: _branchNameController.text.trim(),
       );
-      await _apiClient.saveClientSettings(
+      final savedClient = await _apiClient.saveClientSettings(
         settings: settings,
         actorUsername: widget.session.username,
         actorRole: _roleValue(widget.session.role),
@@ -612,8 +643,12 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         return;
       }
       setState(() {
-        _clientSettings = settings;
-        _lastMessage = 'Client settings saved successfully.';
+        _clientSettings = savedClient;
+        _selectedClientId = savedClient.id;
+        _editingClientId = null;
+        _lastMessage = settings.id == null
+            ? 'Client added successfully.'
+            : 'Client settings saved successfully.';
       });
       await _loadAdminData();
     } catch (error) {
@@ -624,6 +659,22 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         _lastMessage = 'Could not save client settings. Details: $error';
       });
     }
+  }
+
+  void _loadClientForEditing(ClientSettings client) {
+    _editingClientId = client.id;
+    _selectedClientId = client.id;
+    _companyNameController.text = client.companyName;
+    _branchNameController.text = client.branchName;
+    setState(() {});
+  }
+
+  void _clearClientForm() {
+    _editingClientId = null;
+    _selectedClientId = null;
+    _companyNameController.clear();
+    _branchNameController.clear();
+    setState(() {});
   }
 
   void _loadUserForEditing(AppUser user) {
@@ -713,8 +764,8 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
         _profiles = profiles;
         _isLoadingProfiles = false;
         _lastMessage = profiles.isEmpty
-            ? 'No saved settings found in MySQL yet.'
-            : 'Loaded ${profiles.length} saved setting(s) from MySQL.';
+            ? 'Load 0 settings from server.'
+            : 'Load ${profiles.length} settings from server.';
       });
     } catch (error) {
       if (!mounted) {
@@ -1542,15 +1593,89 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
               validator: _requiredValidator,
             ),
             const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _saveClientSettings,
-                icon: const Icon(Icons.apartment_outlined),
-                label: const Text('Save Client Settings'),
-              ),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                FilledButton.icon(
+                  onPressed: _saveClientSettings,
+                  icon: const Icon(Icons.apartment_outlined),
+                  label: Text(
+                    _editingClientId == null ? 'Add Client' : 'Update Client',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _clearClientForm,
+                  icon: const Icon(Icons.add_circle_outline),
+                  label: const Text('New Client'),
+                ),
+              ],
             ),
+            const SizedBox(height: 20),
+            if (_isLoadingAdminData)
+              const Center(child: CircularProgressIndicator())
+            else
+              _buildClientsTable(),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildClientsTable() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          border: Border.all(color: const Color(0xFFD8E2EC)),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 640),
+            child: DataTable(
+              headingRowColor: WidgetStateProperty.all(const Color(0xFFE7F4F7)),
+              columns: const [
+                DataColumn(label: Text('Company')),
+                DataColumn(label: Text('Branch')),
+                DataColumn(label: Text('Edit')),
+              ],
+              rows: _clients.map((client) {
+                final isSelected =
+                    _selectedClientId != null &&
+                    _selectedClientId == (client.id ?? -1);
+                return DataRow(
+                  selected: isSelected,
+                  onSelectChanged: (_) {
+                    setState(() {
+                      _selectedClientId = client.id;
+                    });
+                  },
+                  cells: [
+                    DataCell(
+                      Text(client.companyName),
+                      onDoubleTap: () => _loadClientForEditing(client),
+                    ),
+                    DataCell(
+                      Text(client.branchName),
+                      onDoubleTap: () => _loadClientForEditing(client),
+                    ),
+                    DataCell(
+                      IconButton(
+                        tooltip: 'Edit client',
+                        onPressed: () => _loadClientForEditing(client),
+                        icon: const Icon(Icons.edit_outlined),
+                      ),
+                      onDoubleTap: () => _loadClientForEditing(client),
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
         ),
       ),
     );

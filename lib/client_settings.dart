@@ -1,11 +1,19 @@
 class ClientSettings {
-  const ClientSettings({required this.companyName, required this.branchName});
+  const ClientSettings({
+    this.id,
+    required this.companyName,
+    required this.branchName,
+  });
 
+  final int? id;
   final String companyName;
   final String branchName;
 
   factory ClientSettings.fromJson(Map<String, dynamic> json) {
     return ClientSettings(
+      id: json['id'] is int
+          ? json['id'] as int
+          : int.tryParse('${json['id'] ?? ''}'),
       companyName:
           (json['companyName'] ?? json['company_name'] ?? 'Database Utilities')
               .toString(),
@@ -15,6 +23,6 @@ class ClientSettings {
   }
 
   Map<String, dynamic> toJson() {
-    return {'companyName': companyName, 'branchName': branchName};
+    return {'id': id, 'companyName': companyName, 'branchName': branchName};
   }
 }

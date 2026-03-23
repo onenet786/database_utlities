@@ -101,7 +101,23 @@ class ApiClient {
     return ClientSettings.fromJson(body);
   }
 
-  Future<void> saveClientSettings({
+  Future<List<ClientSettings>> fetchClientSettingsList() async {
+    final uri = _buildUri('/api/client/settings/list');
+    if (uri == null) {
+      throw Exception('API connection is not configured.');
+    }
+
+    final response = await http.get(uri);
+    final body = _decodeBody(response.body);
+    return (body['clients'] as List<dynamic>? ?? const [])
+        .map(
+          (item) =>
+              ClientSettings.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .toList();
+  }
+
+  Future<ClientSettings> saveClientSettings({
     required ClientSettings settings,
     required String actorUsername,
     required String actorRole,
@@ -126,6 +142,9 @@ class ApiClient {
         (body['message'] as String?) ?? 'Could not save client settings.',
       );
     }
+    return ClientSettings.fromJson(
+      Map<String, dynamic>.from(body['client'] as Map? ?? settings.toJson()),
+    );
   }
 
   Future<List<AppUser>> fetchUsers() async {

@@ -507,19 +507,38 @@ async function saveSecurityPreference(payload) {
 
 async function getClientSettings() {
   const [rows] = await pool.query(
-    `SELECT company_name, branch_name
-     FROM app_client_settings
-     WHERE id = 1
-     LIMIT 1`,
+    `SELECT id, company_name, branch_name
+      FROM app_client_settings
+      ORDER BY id ASC
+      LIMIT 1`,
   );
 
   return {
+    id: rows[0]?.id || 1,
     companyName: rows[0]?.company_name || 'Database Utilities',
     branchName: rows[0]?.branch_name || 'Main Branch',
   };
 }
 
+async function listClientSettings() {
+  const [rows] = await pool.query(
+    `SELECT id, company_name, branch_name
+     FROM app_client_settings
+     ORDER BY company_name ASC, branch_name ASC, id ASC`,
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    companyName: row.company_name,
+    branchName: row.branch_name,
+  }));
+}
+
 async function saveClientSettings(payload) {
+  const id =
+    payload.id === null || typeof payload.id === 'undefined'
+      ? null
+      : Number.parseInt(String(payload.id), 10);
   const companyName = String(payload.companyName || payload.company_name || '').trim();
   const branchName = String(payload.branchName || payload.branch_name || '').trim();
 
@@ -527,12 +546,28 @@ async function saveClientSettings(payload) {
     throw new Error('Company name and branch name are required.');
   }
 
+  if (Number.isInteger(id) && id > 0) {
+    await pool.query(
+      `UPDATE app_client_settings
+       SET company_name = ?, branch_name = ?
+       WHERE id = ?`,
+      [companyName, branchName, id],
+    );
+    return { id, companyName, branchName, action: 'updated' };
+  }
+
+  const [maxRows] = await pool.query(
+    'SELECT COALESCE(MAX(id), 0) + 1 AS nextId FROM app_client_settings',
+  );
+  const nextId = maxRows[0]?.nextId || 1;
+
   await pool.query(
     `INSERT INTO app_client_settings (id, company_name, branch_name)
-     VALUES (1, ?, ?)
-     ON DUPLICATE KEY UPDATE company_name = VALUES(company_name), branch_name = VALUES(branch_name)`,
-    [companyName, branchName],
+     VALUES (?, ?, ?)`,
+    [nextId, companyName, branchName],
   );
+
+  return { id: nextId, companyName, branchName, action: 'created' };
 }
 
 async function listUsers() {
@@ -860,19 +895,39 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && req.url === '/api/client/settings/list') {
+    try {
+      const clients = await listClientSettings();
+      sendJson(res, 200, {
+        success: true,
+        clients,
+      });
+    } catch (error) {
+      sendJson(res, 500, {
+        success: false,
+        message: error.message || 'Could not load client settings list.',
+      });
+    }
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/client/settings') {
     try {
       const payload = await readJsonBody(req);
-      await saveClientSettings(payload);
+      const savedClient = await saveClientSettings(payload);
       await logActivity({
         actorUsername: String(payload.actorUsername || 'admin'),
         actorRole: String(payload.actorRole || 'admin'),
         actionName: 'save_client_settings',
-        actionDetails: `Updated company to "${payload.companyName}" and branch to "${payload.branchName}".`,
+        actionDetails: `${savedClient.action === 'created' ? 'Created' : 'Updated'} client "${savedClient.companyName}" with branch "${savedClient.branchName}".`,
       });
       sendJson(res, 200, {
         success: true,
-        message: 'Client settings saved successfully.',
+        client: savedClient,
+        message:
+          savedClient.action === 'created'
+            ? 'Client added successfully.'
+            : 'Client settings saved successfully.',
       });
     } catch (error) {
       sendJson(res, 400, {
