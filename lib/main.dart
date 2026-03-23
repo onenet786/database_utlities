@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
@@ -513,6 +514,8 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
   bool _isAppUserPasswordVisible = false;
   bool _isDiscoveringInstances = false;
   bool _isDiscoveringDatabases = false;
+  bool _isPickingMdf = false;
+  bool _isPickingLdf = false;
   ClientSettings? _clientSettings;
   List<ClientSettings> _clients = [];
   List<AppUser> _users = [];
@@ -1099,6 +1102,94 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
       if (mounted) {
         setState(() {
           _isDiscoveringDatabases = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _pickMdfFile() async {
+    if (_isPickingMdf) {
+      return;
+    }
+
+    setState(() {
+      _isPickingMdf = true;
+    });
+
+    try {
+      const typeGroup = XTypeGroup(label: 'MDF files', extensions: ['mdf']);
+      final file = await openFile(acceptedTypeGroups: [typeGroup]);
+      if (!mounted || file == null) {
+        return;
+      }
+
+      final path = file.path;
+      final fileName = file.name;
+      final dotIndex = fileName.lastIndexOf('.');
+      final guessedName = dotIndex > 0
+          ? fileName.substring(0, dotIndex)
+          : fileName;
+
+      setState(() {
+        _mdfPathController.text = path;
+        if (_databaseNameController.text.trim().isEmpty) {
+          _databaseNameController.text = guessedName;
+        }
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showOperationSnackBar(
+        OperationResult(
+          success: false,
+          message: 'Could not browse MDF file. Details: $error',
+          command: '',
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPickingMdf = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _pickLdfFile() async {
+    if (_isPickingLdf) {
+      return;
+    }
+
+    setState(() {
+      _isPickingLdf = true;
+    });
+
+    try {
+      const typeGroup = XTypeGroup(label: 'LDF files', extensions: ['ldf']);
+      final file = await openFile(acceptedTypeGroups: [typeGroup]);
+      if (!mounted || file == null) {
+        return;
+      }
+
+      setState(() {
+        _ldfPathController.text = file.path;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showOperationSnackBar(
+        OperationResult(
+          success: false,
+          message: 'Could not browse LDF file. Details: $error',
+          command: '',
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPickingLdf = false;
         });
       }
     }
@@ -1879,12 +1970,34 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                 label: 'MDF file path',
                 hint: r'C:\SQLData\EmployeeDB.mdf',
                 validator: _requiredValidator,
+                trailingAction: TextButton.icon(
+                  onPressed: _isPickingMdf ? null : _pickMdfFile,
+                  icon: _isPickingMdf
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.folder_open_outlined),
+                  label: const Text('Browse'),
+                ),
               ),
               const SizedBox(height: 16),
               _buildField(
                 controller: _ldfPathController,
                 label: 'LDF file path',
                 hint: r'C:\SQLData\EmployeeDB_log.ldf (optional)',
+                trailingAction: TextButton.icon(
+                  onPressed: _isPickingLdf ? null : _pickLdfFile,
+                  icon: _isPickingLdf
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.folder_open_outlined),
+                  label: const Text('Browse'),
+                ),
               ),
               const SizedBox(height: 20),
               SegmentedButton<AuthenticationMode>(
