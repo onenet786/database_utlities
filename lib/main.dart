@@ -190,7 +190,7 @@ class _DatabaseUtilitiesAppState extends State<DatabaseUtilitiesApp>
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Database Utilities',
+      title: 'OneNet System Tools',
       theme: ThemeData(
         colorScheme: colorScheme,
         scaffoldBackgroundColor: const Color(0xFFF3F6F8),
@@ -333,7 +333,7 @@ class _AppSplashScreenState extends State<AppSplashScreen>
                       ),
                       const SizedBox(height: 28),
                       Text(
-                        'Database Utilities',
+                        'OneNet System Tools',
                         style: Theme.of(context).textTheme.headlineMedium
                             ?.copyWith(
                               color: Colors.white,
@@ -1795,7 +1795,7 @@ class _DatabaseUtilityHomePageState extends State<DatabaseUtilityHomePage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'Database Utilities',
+                    'OneNet System Tools',
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(

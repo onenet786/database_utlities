@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "database_utlities" "\0"
+            VALUE "CompanyName", "OneNet Solutions" "\0"
+            VALUE "FileDescription", "OneNet System Tools" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "database_utlities" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
+            VALUE "InternalName", "onenet_system_tools" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 OneNet Solutions. All rights reserved." "\0"
             VALUE "OriginalFilename", "database_utlities.exe" "\0"
-            VALUE "ProductName", "database_utlities" "\0"
+            VALUE "ProductName", "OneNet System Tools" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
